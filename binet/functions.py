@@ -1,4 +1,4 @@
-from networkx import Graph,minimum_spanning_tree,number_connected_components
+from networkx import Graph,minimum_spanning_tree,number_connected_components,is_connected,connected_component_subgraphs
 import json
 from pandas import DataFrame,merge,concat,read_csv
 from numpy import array,matrix,mean,std
@@ -10,6 +10,8 @@ import io,urllib2,bz2
 def CalculateComplexity(M,th=0.0001):
     '''Calculates the Economic Complexity Index following the method of reflections presented in
     Hidalgo and Hausmann 2010, The building blocks of economic complexity.
+    THIS FUNCTION NEEDS TO BE TESTED!!!
+
     Parameters
     ----------
     M : numpy array with only zeros and ones.
@@ -49,7 +51,7 @@ def CalculateComplexity(M,th=0.0001):
     PCI = (kp-mean(kp))/std(kp)
     return ECI.tolist(),PCI.tolist()
 
-def build_connected(dis,th,s='',t='',w='',directed=False):
+def build_connected(dis_,th,s='',t='',w='',directed=False):
     """Builds a connected network out of a set of weighted edges and a threshold.
 
     Parameters
@@ -82,13 +84,17 @@ def build_connected(dis,th,s='',t='',w='',directed=False):
     Set the threshold low to begin with.
 
     """
-    s = dis.columns.values[0] if s=='' else s
-    t = dis.columns.values[1] if t=='' else t
-    w = dis.columns.values[2] if w=='' else w
+    s = dis_.columns.values[0] if s=='' else s
+    t = dis_.columns.values[1] if t=='' else t
+    w = dis_.columns.values[2] if w=='' else w
 
-    G = nx.Graph()
+    dis = dis_[[s,t,w]]
+    dis[s] = dis[s].astype(str)
+    dis[t] = dis[t].astype(str)
+
+    G = Graph()
     G.add_edges_from(list(set([tuple(set(edge)) for edge in zip(dis[s],dis[t])])))
-    if not nx.is_connected(G):
+    if not is_connected(G):
         raise NameError('The provided network is not connected.')
 
     if not directed:
@@ -101,19 +107,23 @@ def build_connected(dis,th,s='',t='',w='',directed=False):
         out = []
         for u,v in T.edges():
             out.append((u,v,T.get_edge_data(u, v)['weight']))
+            if type(v) != type(1):
+                print v,type(v)
         edges = DataFrame(out,columns=[s,t,w])
+        edges[s] = edges[s].astype(dis_.dtypes[s])
+        edges[t] = edges[s].astype(dis_.dtypes[t])
         return edges
     else:
         net = dis[dis[w]>=th]
-        G = nx.Graph()
+        G = Graph()
         G.add_edges_from(list(set([tuple(set(edge)) for edge in zip(net[s],net[t])])))
-        N_con = nx.number_connected_components(G)
+        N_con = number_connected_components(G)
         while N_con>1:
-            Gc = max(nx.connected_component_subgraphs(G), key=len)
+            Gc = max(connected_component_subgraphs(G), key=len)
             data_g = [merge(DataFrame(Gc.nodes(),columns=['node_id']),dis,how='inner',left_on='node_id',right_on=s),
                   merge(DataFrame(Gc.nodes(),columns=['node_id']),dis,how='inner',left_on='node_id',right_on=t)]
             data_g = concat(data_g).drop('node_id',1).drop_duplicates()
-            graphs = nx.connected_component_subgraphs(G)
+            graphs = connected_component_subgraphs(G)
             for g in graphs:
                 if len(g) != len(Gc):
                     d_temp = []
@@ -124,11 +134,13 @@ def build_connected(dis,th,s='',t='',w='',directed=False):
                         print 'Not possible to connect nodes: ',g.nodes()
                     net.loc[len(net)] = d_temp.sort('t',ascending=False).iloc[0].values
                     break
-            G = nx.Graph()
+            G = Graph()
             G.add_edges_from(list(set([tuple(set(edge)) for edge in zip(net[s],net[t])])))
-            N_con = nx.number_connected_components(G)
+            N_con = number_connected_components(G)
         print 'N edges:',len(net)
         print 'N nodes:',len(set(net[s].values)|set(net[t].values))
+        net[s] = net[s].astype(dis_.dtypes[s])
+        net[t] = net[s].astype(dis_.dtypes[t])
         return net
     
 
@@ -167,7 +179,8 @@ def df_interp(df,by=None,x=None,y=None,kind='linear'):
     x  = df.columns.values[1] if x is None else x
     y  = df.columns.values[2] if y is None else y
     interp = []
-    for c in set(df[by].values):
+    cs = list(set(df[by].values))
+    for c in cs:
         gc = df[df[by]==c].sort_values(by=x)
         X = gc[x]
         Y = gc[y]
@@ -179,7 +192,9 @@ def df_interp(df,by=None,x=None,y=None,kind='linear'):
 
 
 def WDI_get(var_name,start_year=None,end_year=None):
-    """Retrieves the given worl indicator from the WDI website."""
+    """Retrieves the given development indicator from the World Bank website.
+    http://data.worldbank.org/data-catalog/world-development-indicators
+    """
     start_year = 1995 if start_year is None else start_year
     end_year   = 2008 if end_year is None else end_year
     if end_year<start_year:
@@ -208,13 +223,25 @@ def WDI_get(var_name,start_year=None,end_year=None):
 
 def trade_data(classification='sitc'):
     '''Downloads the world trade data from atlas.media.mit.edu
+
+    Example
+    ----------
+    >>> world_trade,pnames,cnames = bnt.trade_data('hs96')
     '''
-    if classification not in ['sitc','hs92']:
+    if classification not in ['sitc','hs92','hs96','hs02','hs07']:
         raise NameError('Invalid classification')
     print 'Retrieving trade data for '+classification
     atlas_url = 'http://atlas.media.mit.edu/static/db/raw/'
-    trade_file = {'sitc':'year_origin_sitc_rev2.tsv.bz2','hs92':'year_origin_hs92_4.tsv.bz2'}
-    pname_file = {'sitc':'products_sitc_rev2.tsv.bz2','hs92':'products_hs_92.tsv.bz2'}
+    trade_file = {'sitc':'year_origin_sitc_rev2.tsv.bz2',
+                  'hs92':'year_origin_hs92_4.tsv.bz2',
+                  'hs96':'year_origin_hs96_4.tsv.bz2',
+                  'hs02':'year_origin_hs02_4.tsv.bz2',
+                  'hs07':'year_origin_hs07_4.tsv.bz2'}
+    pname_file = {'sitc':'products_sitc_rev2.tsv.bz2',
+                  'hs92':'products_hs_92.tsv.bz2',
+                  'hs96':'products_hs_96.tsv.bz2',
+                  'hs02':'products_hs_02.tsv.bz2',
+                  'hs07':'products_hs_07.tsv.bz2'}
 
     print 'Downloading country names from '+atlas_url+'country_names.tsv.bz2'
     data = bz2.decompress(urllib2.urlopen(atlas_url+'country_names.tsv.bz2').read())
@@ -223,13 +250,15 @@ def trade_data(classification='sitc'):
     print 'Downloading product names from '+atlas_url + pname_file[classification]
     data = bz2.decompress(urllib2.urlopen(atlas_url + pname_file[classification]).read())
     pnames = read_csv(io.BytesIO(data),delimiter='\t')
-    if classification == 'hs92':
-        pnames['id_len'] = pnames['hs92'].str.len()
-        pnames = pnames[pnames['id_len']==4]
+    pnames[classification] = pnames[classification].astype(str)
+    if classification[:2] == 'hs':
+        pnames['id_len'] = pnames[classification].str.len()
+        pnames = pnames[pnames['id_len']<=4]
     pnames = pnames[[classification,'name']].rename(columns={classification:'pcode'}).dropna()
     pnames['pcode'] = pnames['pcode'].astype(int)
+    pnames = pnames.sort_values(by='pcode')
     
-    print 'Downloading trade data from    '+atlas_url +trade_file[classification]
+    print 'Downloading trade   data  from '+atlas_url +trade_file[classification]
     data = bz2.decompress(urllib2.urlopen(atlas_url +trade_file[classification]).read())
     world_trade = read_csv(io.BytesIO(data),delimiter='\t')[['year','origin',classification,'export_val']].rename(columns={'origin':'ccode',classification:'pcode','export_val':'x'}).dropna()
     world_trade['year'] = world_trade['year'].astype(int)

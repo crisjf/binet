@@ -71,7 +71,8 @@ class mcp(object):
         self.data = merge(self.data,calculateRCA(self.data,c=self.c,p=self.p,x=self.x,shares=True).drop(self.x,1),how='left',left_on=[self.c,self.p],right_on=[self.c,self.p])
 
     def build_net(self,RCA=True,th = 1.):
-        '''If RCA is set to False then th should be provided'''
+        '''If RCA is set to False then th should be provided.
+        Builds the bipartite network with the given data.'''
         if self.name!='':
             print self.name + ':'
         print 'Building network\nRCA = '+str(RCA)+'\nth = '+str(th)
