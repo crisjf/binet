@@ -51,7 +51,8 @@ def CalculateComplexity(M,th=0.0001):
     PCI = (kp-mean(kp))/std(kp)
     return ECI.tolist(),PCI.tolist()
 
-def build_connected(dis_,th,s='',t='',w='',directed=False):
+
+def build_connected(dis_,th,s=None,t=None,w=None,directed=False):
     """Builds a connected network out of a set of weighted edges and a threshold.
 
     Parameters
@@ -84,13 +85,13 @@ def build_connected(dis_,th,s='',t='',w='',directed=False):
     Set the threshold low to begin with.
 
     """
-    s = dis_.columns.values[0] if s=='' else s
-    t = dis_.columns.values[1] if t=='' else t
-    w = dis_.columns.values[2] if w=='' else w
+    s = dis_.columns.values[0] if s is None else s
+    t = dis_.columns.values[1] if t is None else t
+    w = dis_.columns.values[2] if w is None else w
 
     dis = dis_[[s,t,w]]
-    dis[s] = dis[s].astype(str)
-    dis[t] = dis[t].astype(str)
+    dis[s] = dis[s].astype(int).astype(str)
+    dis[t] = dis[t].astype(int).astype(str)
 
     G = Graph()
     G.add_edges_from(list(set([tuple(set(edge)) for edge in zip(dis[s],dis[t])])))
@@ -107,11 +108,9 @@ def build_connected(dis_,th,s='',t='',w='',directed=False):
         out = []
         for u,v in T.edges():
             out.append((u,v,T.get_edge_data(u, v)['weight']))
-            if type(v) != type(1):
-                print v,type(v)
         edges = DataFrame(out,columns=[s,t,w])
         edges[s] = edges[s].astype(dis_.dtypes[s])
-        edges[t] = edges[s].astype(dis_.dtypes[t])
+        edges[t] = edges[t].astype(dis_.dtypes[t])
         return edges
     else:
         net = dis[dis[w]>=th]
@@ -140,7 +139,7 @@ def build_connected(dis_,th,s='',t='',w='',directed=False):
         print 'N edges:',len(net)
         print 'N nodes:',len(set(net[s].values)|set(net[t].values))
         net[s] = net[s].astype(dis_.dtypes[s])
-        net[t] = net[s].astype(dis_.dtypes[t])
+        net[t] = net[t].astype(dis_.dtypes[t])
         return net
     
 
