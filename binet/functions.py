@@ -269,7 +269,9 @@ def trade_data(classification='sitc'):
 
 
 def build_html(nodes,edges,node_id =None,source_id =None,target_id=None,size_id=None,weight_id = None,x=None,y=None,color=None,props = None,progress=True):
-    """Creates an html file with a d3plus visualization of the network from the dataframes nodes and edges."""
+    """Creates an html file with a d3plus visualization of the network from the dataframes nodes and edges.
+        NEEDS A FUNCTION TO HANDLE WITH MANY DIFFERENT COLORS
+    """
 
     node_id = nodes.columns.values[0] if node_id is None else node_id
     source_id = edges.columns.values[0] if source_id is None else source_id
@@ -287,6 +289,10 @@ def build_html(nodes,edges,node_id =None,source_id =None,target_id=None,size_id=
         print 'x,y      :',x,',',y
         print 'color    :',color
         print 'props    :',props
+
+    if color is not None:
+        if len(set(nodes[color].values))>=15:
+            raise NameError('Too many different colors, try using Jenks Natural Breaks')
 
     sample_data = '[\n'
     positions = '[\n'
