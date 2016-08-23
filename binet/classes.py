@@ -1,7 +1,11 @@
 from pandas import DataFrame,merge
-from numpy import sqrt,mean
+from numpy import sqrt,mean,corrcoef
 import networkx as nx
-from functions import calculateRCA,CalculateComplexity
+from functions import calculateRCA,CalculateComplexity,build_connected,build_html
+from functions_gt import get_pos
+from os import getcwd
+import webbrowser
+from copy import deepcopy
 
 class mcp(object):
     def __init__(self,data,name='',nodes_c=None,nodes_p=None,c='',p='',x=''):
@@ -19,6 +23,8 @@ class mcp(object):
         self.load_links_data(data=data,c=c,p=p,x=x)
         self.load_nodes_data(nodes_c=nodes_c,nodes_p=nodes_p)
         self.projection_d = {self.c:None,self.p:None}
+        self.projection_t = {self.c:None,self.p:None}
+        self.projection_th = {self.c:None,self.p:None}
         
     def load_links_data(self,data,c='',p='',x=''):
         """Loads the data into the class.
@@ -66,16 +72,20 @@ class mcp(object):
             nodes_p = DataFrame(list(set(nodes_p)),columns=[self.p]) if type(nodes_p) == type([]) else nodes_p[[self.p]].drop_duplicates()
             self._nodes[self.p] = merge(nodes_p,self._nodes[self.p],how='left',left_on=self.p,right_on=self.p)
             self.data = merge(nodes_p,self.data,how='left',left_on=self.p,right_on=self.p)
+        if 'RCA' in self.data.columns.values:
+            self.data = self.data.drop('RCA',1)
+        self.net = None
 
     def _calculate_RCA(self):
         self.data = merge(self.data,calculateRCA(self.data,c=self.c,p=self.p,x=self.x,shares=True).drop(self.x,1),how='left',left_on=[self.c,self.p],right_on=[self.c,self.p])
 
-    def build_net(self,RCA=True,th = 1.):
+    def build_net(self,RCA=True,th = 1.,progress=True):
         '''If RCA is set to False then th should be provided.
         Builds the bipartite network with the given data.'''
-        if self.name!='':
-            print self.name + ':'
-        print 'Building network\nRCA = '+str(RCA)+'\nth = '+str(th)
+        if (self.name!='')&progress:
+            print self.name + ': '+'Building bipartite network\nRCA = '+str(RCA)+'\nth = '+str(th)
+        elif progress:
+            print 'Building bipartite network\nRCA = '+str(RCA)+'\nth = '+str(th)
         if RCA:
             if 'RCA' not in self.data.columns.values:
                 self._calculate_RCA()
@@ -85,13 +95,14 @@ class mcp(object):
             self.net = self.data[self.data[self.x]>=th][[self.c,self.p]]
         nc = len(set(self.net[self.c].values).intersection(set(self._nodes[self.c][self.c].values)))
         np = len(set(self.net[self.p].values).intersection(set(self._nodes[self.p][self.p].values)))
-        print 'N nodes_c = '+str(nc)
-        if nc != len(self._nodes[self.c]):
-            print '\t('+str(len(self._nodes[self.c])-nc)+' nodes were dropped)\n'
-        print 'N nodes_p = '+str(np)
-        if np != len(self._nodes[self.p]):
-            print '\t('+str(len(self._nodes[self.p])-np)+' nodes were dropped)\n'
-        print 'N edges = '+str(len(self.net))
+        if progress:
+            print 'N nodes_c = '+str(nc)
+            if nc != len(self._nodes[self.c]):
+                print '\t('+str(len(self._nodes[self.c])-nc)+' nodes were dropped)\n'
+            print 'N nodes_p = '+str(np)
+            if np != len(self._nodes[self.p]):
+                print '\t('+str(len(self._nodes[self.p])-np)+' nodes were dropped)\n'
+            print 'N edges = '+str(len(self.net))
 
     def nodes(self,side):
         if side not in [self.c,self.p]:
@@ -152,25 +163,36 @@ class mcp(object):
         dis = dis[[side+'_x',side+'_y','fi']]
         self.projection_d[side] = dis
     
-    def projection(self,side):
+    def projection(self,side,progress=True,trimmed=False):
         """Used to access the projection of the bipartite network"""
-        if self.projection_d[side] is None:
-            print self.name + 'Calculating projection on '+str(side)
-            self.project(side)
-        return self.projection_d[side]
+        if trimmed:
+            if self.projection_t[side] is None:
+                raise NameError('Projection not trimmed, please run \n>>> M.trim_projection(side,th)')
+            return self.projection_t[side]
+        else:
+            if self.projection_d[side] is None:
+                if progress:
+                    print self.name +': ' + 'Calculating projection on '+str(side)
+                self.project(side)
+            return self.projection_d[side]
 
 
-    def to_csv(self,side,path=''):
-        '''Dumps one of the projections into two csv files (name_side_nodes.csv,name_side_edges.csv) that can be imported into cytoscape.'''
+    def to_csv(self,side,path='',trimmed=False):
+        '''Dumps one of the projections into two csv files (name_side_nodes.csv,name_side_edges.csv).'''
         if self.projection_d[side] is None:
-            raise NameError('No projection defined. Please run \n>>> projection(side)')
+            raise NameError('No projection available. Please run \n>>> M.projection(side)')
         self.nodes(side).to_csv(path+self.name+'_'+side+'_nodes.csv')
-        self.projection(side).to_csv(path+self.name+'_'+side+'_edges.csv')
+        if trimmed:
+            if self.projection_t[side] is None:
+                raise NameError('Projection not trimmed. Please run \n>>> M.trim_projection(side,th)')
+            self.projection(side,trimmed=True).to_csv(path+self.name+'_'+side+'_th'+str(self.projection_th[side])+'_edges.csv')
+        else:
+            self.projection(side).to_csv(path+self.name+'_'+side+'_edges.csv')
 
     def _as_matrix(self):
         '''Returns the network as an adjacency matrix. Useful to calculate complexity.'''
         if self.net is None:
-            raise NameError('No network defined. Please run \n>>> build_net()')
+            raise NameError('No network available. Please run \n>>> build_net()')
         self.net['value'] = 1
         dfM = self.net.pivot(index=self.c,columns=self.p,values='value').fillna(0)
         self.net = self.net.drop('value',1)
@@ -188,6 +210,79 @@ class mcp(object):
         self._nodes[self.c] = merge(self._nodes[self.c],ECI,how = 'left',left_on=self.c,right_on=self.c)
         self._nodes[self.p] = merge(self._nodes[self.p],PCI,how = 'left',left_on=self.p,right_on=self.p)
         return ECI,PCI
+
+    def trim_projection(self,side,th):
+        if side not in [self.c,self.p]:
+            raise NameError('Wrong label, choose between '+self.c+' and '+self.p)
+        self.projection_th[side] = th
+        self.projection_t[side] = build_connected(self.projection(side,progress=False),th,progress=False)
+
+    def _get_projection_pos(self,side,C=None):
+        '''This function requires graph_tool'''
+        if (self.projection_t[self.c]is None)|(self.projection_t[self.p]is None):
+            raise NameError('Please run trim_projection(side,th) first')
+
+        pos_c = get_pos(self.projection_t[self.c][[self.c+'_x',self.c+'_y']],node_id=self.c,comms=True,progress=False,C=C)
+        pos_p = get_pos(self.projection_t[self.p][[self.p+'_x',self.p+'_y']],node_id=self.p,comms=True,progress=False,C=C)
+
+        if 'x' in self._nodes[self.c].columns.values:
+            self._nodes[self.c] = self._nodes[self.c].drop(['x','y'],1)
+        if 'x' in self._nodes[self.p].columns.values:
+            self._nodes[self.p] = self._nodes[self.p].drop(['x','y'],1)
+
+        self._nodes[self.c] = merge(self._nodes[self.c],pos_c)
+        self._nodes[self.p] = merge(self._nodes[self.p],pos_p)
+
+
+    def draw_projections(self,C=None,path='',show=True):
+        '''path must be the absolut path, including the "/" symbol at the end. 
+        This function requires graph_tool'''
+        if (self.projection_t[self.c]is None)|(self.projection_t[self.p]is None):
+            raise NameError( 'Please run \n>>>M.trim_projection(side,th)')
+        cs = self.projection_t[self.c][[self.c+'_x',self.c+'_y']]
+        ps = self.projection_t[self.p][[self.p+'_x',self.p+'_y']]
+        if 'x' not in self._nodes[self.c].columns.values:
+            self._get_projection_pos(self.c,C=C)
+        if 'x' not in self._nodes[self.p].columns.values:
+            self._get_projection_pos(self.p,C=C)
+
+        path = 'file://'+getcwd()+'/' if path == '' else path+'/'
+
+        props = [val for val in self._nodes[self.c].columns.values.tolist() if val not in set([self.c,self.c+'_index','x','y'])]
+        html = build_html(self._nodes[self.c],cs,node_id=self.c,source_id=self.c+'_x',target_id=self.c+'_y',color='c',props=props,progress=False)
+        out = self.c+'_'+self.name+'_th'+str(self.projection_th[self.c])+'.html' 
+        open(out,mode='w').write(html)
+        if show:
+            webbrowser.open(path+out)
+            print 'OUT: ',path+out
+    
+        props = [val for val in self._nodes[self.p].columns.values.tolist() if val not in set([self.p,self.p+'_index','x','y'])]
+        html = build_html(self._nodes[self.p],ps,node_id=self.p,source_id=self.p+'_x',target_id=self.p+'_y',color='c',props=props,progress=False)
+        out = self.p+'_'+self.name+'_th'+str(self.projection_th[self.p])+'.html' 
+        open(out,mode='w').write(html)
+        if show:
+            webbrowser.open(path+out)
+            print 'OUT: ',path+out
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class tnet(object):
@@ -257,3 +352,120 @@ class tnet(object):
     def t(self):
         return self.data[[self.u,self.v,'t']]
 
+
+
+class compare_nets():
+    def __init__(self,M1_,M2_):
+        if (M1_.name!='')|(M2_.name!=''):
+            self.n1 = 'Unnamed' if M1_.name == '' else M1_.name
+            self.n2 = 'Unnamed' if M2_.name == '' else M2_.name
+
+        M1 = deepcopy(M1_)
+        M2 = deepcopy(M2_)
+        if M1.net is None:
+            M1.build_net(progress=False)
+        if M2.net is None:
+            M2.build_net(progress=False)
+        edges1 = M1.net[[M1.c,M1.p]]
+        edges2 = M2.net[[M2.c,M2.p]]
+
+        nodes1 = set(M1.nodes(M1.c)[M1.c].values)
+        nodes2 = set(M2.nodes(M2.c)[M2.c].values)
+        self.c_total_nodes     = len(nodes1|nodes2)
+        self.c_repeated_nodes  = len(nodes1.intersection(nodes2))
+        self.c_f_missing_nodes = 1.-len(nodes1.intersection(nodes2))/float(len(nodes1|nodes2))
+        self.c_f_missing_1     = 1.-len(nodes1)/float(len(nodes1|nodes2))
+        self.c_f_missing_2     = 1.-len(nodes2)/float(len(nodes1|nodes2))
+
+        nodes_c = list(nodes1.intersection(nodes2))
+        nodes = DataFrame(nodes_c,columns=['node_id'])
+        edges1 = merge(edges1,nodes,how='right',left_on=M1.c,right_on='node_id').drop('node_id',1)
+        edges2 = merge(edges2,nodes,how='right',left_on=M2.c,right_on='node_id').drop('node_id',1)
+
+        nodes1 = set(M1.nodes(M1.p)[M1.p].values)
+        nodes2 = set(M2.nodes(M2.p)[M2.p].values)
+        self.p_total_nodes     = len(nodes1|nodes2)
+        self.p_repeated_nodes  = len(nodes1.intersection(nodes2))
+        self.p_f_missing_nodes = 1.-len(nodes1.intersection(nodes2))/float(len(nodes1|nodes2))
+        self.p_f_missing_1     = 1.-len(nodes1)/float(len(nodes1|nodes2))
+        self.p_f_missing_2     = 1.-len(nodes2)/float(len(nodes1|nodes2))
+            
+
+        nodes_p = list(nodes1.intersection(nodes2))
+        nodes = DataFrame(nodes_p,columns=['node_id'])
+        edges1 = merge(edges1,nodes,how='right',left_on=M1.p,right_on='node_id').drop('node_id',1)
+        edges2 = merge(edges2,nodes,how='right',left_on=M2.p,right_on='node_id').drop('node_id',1)
+    
+        edges1['edge'] = edges1[M1.c].astype(str)+'-'+edges1[M1.p].astype(str)
+        edges2['edge'] = edges2[M2.c].astype(str)+'-'+edges2[M1.p].astype(str)
+        edges1 = set(edges1['edge'].values.tolist())
+        edges2 = set(edges2['edge'].values.tolist())
+
+        self.e_total_edges     = len(edges1|edges2)
+        self.e_f_missing_edges = 1.-len(edges1.intersection(edges1))/float(len(edges1|edges2))
+        self.e_f_missing_1     = 1.-len(edges1)/float(len(edges1|edges2))
+        self.e_f_missing_2     = 1.-len(edges2)/float(len(edges1|edges2))
+
+        M1.filter_nodes(nodes_c=nodes_c,nodes_p=nodes_p)
+        M2.filter_nodes(nodes_c=nodes_c,nodes_p=nodes_p)
+        M1.build_net(progress=False)
+        M2.build_net(progress=False)
+
+        edges1 = M1.net[[M1.c,M1.p]]
+        edges2 = M2.net[[M2.c,M2.p]]
+        edges1['edge'] = edges1[M1.c].astype(str)+'-'+edges1[M1.p].astype(str)
+        edges2['edge'] = edges2[M2.c].astype(str)+'-'+edges2[M1.p].astype(str)
+        edges1 = set(edges1['edge'].values.tolist())
+        edges2 = set(edges2['edge'].values.tolist())
+
+        self.f_total_edges     = len(edges1|edges2)
+        self.f_f_missing_edges = 1.-len(edges1.intersection(edges1))/float(len(edges1|edges2))
+        self.f_f_missing_1     = 1.-len(edges1)/float(len(edges1|edges2))
+        self.f_f_missing_2     = 1.-len(edges2)/float(len(edges1|edges2))
+
+
+        cp = merge(M1.projection(M1.c).rename(columns={'fi':'fi_1'}),M2.projection(M2.c).rename(columns={'fi':'fi_2'}),how='inner')
+        self.proj_c = corrcoef(cp['fi_1'],cp['fi_2'])[0,1]
+        cp = merge(M1.projection(M1.p).rename(columns={'fi':'fi_1'}),M2.projection(M2.p).rename(columns={'fi':'fi_2'}),how='inner')
+        self.proj_p = corrcoef(cp['fi_1'],cp['fi_2'])[0,1]
+
+
+        self.c_m1 = M1.c
+        self.c_m2 = M2.c
+        self.p_m1 = M1.p
+        self.p_m2 = M2.p
+
+    def summary(self):
+        print 'Summary of comparing networks '+self.n1+' with '+self.n2
+        print ','.join(list(set([self.c_m1,self.c_m2])))
+        print '\tTotal nodes          :',self.c_total_nodes
+        print '\tTotal repeated nodes :',self.c_repeated_nodes
+        print '\tFracion missing nodes:',self.c_f_missing_nodes
+        print '\tMissing nodes on 1   :',self.c_f_missing_1
+        print '\tMissing nodes on 2   :',self.c_f_missing_2
+        print ''
+        print ','.join(list(set([self.p_m1,self.p_m2])))
+        print '\tTotal nodes          :',self.p_total_nodes
+        print '\tTotal repeated nodes :',self.p_repeated_nodes
+        print '\tFracion missing nodes:',self.p_f_missing_nodes
+        print '\tMissing nodes on 1   :',self.p_f_missing_1
+        print '\tMissing nodes on 2   :',self.p_f_missing_2
+        print ''
+        print ','.join(list(set([str(self.c_m1)+'-'+str(self.p_m1),str(self.c_m2)+'-'+str(self.p_m2)])))
+        print '\tTotal edges          :',self.e_total_edges
+        print '\tFracion missing edges:',self.e_f_missing_edges
+        print '\tMissing edges on 1   :',self.e_f_missing_1
+        print '\tMissing edges on 2   :',self.e_f_missing_2
+        print ''
+        print 'Filtered '+','.join(list(set([str(self.c_m1)+'-'+str(self.p_m1),str(self.c_m2)+'-'+str(self.p_m2)])))
+        print '\tTotal edges          :',self.f_total_edges
+        print '\tFracion missing edges:',self.f_f_missing_edges
+        print '\tMissing edges on 1   :',self.f_f_missing_1
+        print '\tMissing edges on 2   :',self.f_f_missing_2
+        print ''
+        print 'Projection ',','.join(list(set([self.c_m1,self.c_m2])))
+        print 'Correlation between fis:',self.proj_c
+        print ''
+        print 'Projection ',','.join(list(set([self.p_m1,self.p_m2])))
+        print 'Correlation between fis:',self.proj_p
+        print ''

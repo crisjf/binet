@@ -1,11 +1,11 @@
 from networkx import Graph,minimum_spanning_tree,number_connected_components,is_connected,connected_component_subgraphs
 import json
 from pandas import DataFrame,merge,concat,read_csv
-from numpy import array,matrix,mean,std
-import numpy as np
+from numpy import array,matrix,mean,std,log
 from scipy.interpolate import interp1d
-import requests
+from requests import get
 import io,urllib2,bz2
+
 
 def CalculateComplexity(M,th=0.0001):
     '''Calculates the Economic Complexity Index following the method of reflections presented in
@@ -52,7 +52,7 @@ def CalculateComplexity(M,th=0.0001):
     return ECI.tolist(),PCI.tolist()
 
 
-def build_connected(dis_,th,s=None,t=None,w=None,directed=False):
+def build_connected(dis_,th,s=None,t=None,w=None,directed=False,progress=True):
     """Builds a connected network out of a set of weighted edges and a threshold.
 
     Parameters
@@ -103,8 +103,9 @@ def build_connected(dis_,th,s=None,t=None,w=None,directed=False):
         G.add_edges_from(zip(dis[s].values,dis[t].values,[{'weight':f} for f in dis[w]]))
         T = minimum_spanning_tree(G)
         T.add_edges_from([(u,v,{'weight':we}) for u,v,we in dis[dis[w]>=th].values.tolist()])
-        print 'N edges:',len(T.edges())
-        print 'N nodes:',len(T.nodes())
+        if progress:
+            print 'N edges:',len(T.edges())
+            print 'N nodes:',len(T.nodes())
         out = []
         for u,v in T.edges():
             out.append((u,v,T.get_edge_data(u, v)['weight']))
@@ -136,8 +137,9 @@ def build_connected(dis_,th,s=None,t=None,w=None,directed=False):
             G = Graph()
             G.add_edges_from(list(set([tuple(set(edge)) for edge in zip(net[s],net[t])])))
             N_con = number_connected_components(G)
-        print 'N edges:',len(net)
-        print 'N nodes:',len(set(net[s].values)|set(net[t].values))
+        if progress:
+            print 'N edges:',len(net)
+            print 'N nodes:',len(set(net[s].values)|set(net[t].values))
         net[s] = net[s].astype(dis_.dtypes[s])
         net[t] = net[t].astype(dis_.dtypes[t])
         return net
@@ -184,7 +186,7 @@ def df_interp(df,by=None,x=None,y=None,kind='linear'):
         X = gc[x]
         Y = gc[y]
         f = interp1d(X, Y, kind=kind)
-        xx = np.array(range(min(X),max(X)+1))
+        xx = array(range(min(X),max(X)+1))
         yy = f(xx)
         interp+=zip(len(xx)*[c],xx,yy)
     return DataFrame(interp,columns=[by,x,y])
@@ -203,13 +205,13 @@ def WDI_get(var_name,start_year=None,end_year=None):
     
     WDI_api  = WDI_base+var_name+'?date='+str(start_year)+':'+str(end_year)+'&format=json'
     ccodes = read_csv(codes_url)[['ISO 3166-1 2 Letter Code','ISO 3166-1 3 Letter Code']].rename(columns={'ISO 3166-1 2 Letter Code':'ccode2','ISO 3166-1 3 Letter Code':'ccode'})
-    r = requests.get(WDI_api).json()
+    r = get(WDI_api).json()
     pages = r[0]['pages']
     ind_name = r[1][0]['indicator']['value']
     print 'Getting "'+ind_name+'" between '+str(start_year)+' and '+str(end_year)
     data = [(entry['date'], entry['country']['id'],entry['value']) for entry in r[1]]
     for page in range(2,pages+1):
-        r = requests.get(WDI_api+'&page='+str(page)).json()
+        r = get(WDI_api+'&page='+str(page)).json()
         data += [(entry['date'], entry['country']['id'],entry['value']) for entry in r[1]]
     data = merge(ccodes,DataFrame(data,columns=['year','ccode2',ind_name]),how='left')[['ccode','year',ind_name]].dropna()
     data['ccode'] = data['ccode'].str.lower()
@@ -265,26 +267,78 @@ def trade_data(classification='sitc'):
     return world_trade,pnames,cnames
 
 
-def build_html(nodes,edges,node_id = '',source_id = '',target_id='',**kwargs):
+
+def build_html(nodes,edges,node_id =None,source_id =None,target_id=None,size_id=None,weight_id = None,x=None,y=None,color=None,props = None,progress=True):
     """Creates an html file with a d3plus visualization of the network from the dataframes nodes and edges."""
 
-    node_id = nodes.columns.values[0] if node_id == '' else node_id
-    source_id = edges.columns.values[0] if source_id == '' else source_id
-    target_id = edges.columns.values[0] if target_id == '' else target_id
+    node_id = nodes.columns.values[0] if node_id is None else node_id
+    source_id = edges.columns.values[0] if source_id is None else source_id
+    target_id = edges.columns.values[1] if target_id is None else target_id
+    props = [] if props is None else props
+    x = 'x' if x is None else x
+    y = 'y' if y is None else y
+    
+    if progress:
+        print 'node_id  :',node_id
+        print 'source_id:',source_id
+        print 'target_id:',target_id
+        print 'size_id  :',size_id
+        print 'weight_id:',weight_id
+        print 'x,y      :',x,',',y
+        print 'color    :',color
+        print 'props    :',props
 
-    sample_data = '['
-    positions = '['
-    connections = '['
+    sample_data = '[\n'
+    positions = '[\n'
+    connections = '[\n'
+    
+    for entry in nodes.itertuples():
+        row = dict(zip(['index']+nodes.columns.values.tolist(),entry))
+        sd = ['"n_id":'+'"'+str(row[node_id])+'"']
+        if size_id is not None:
+            ad.append('"size":'+str(log(row[size_id])))
+        
+        if color is not None:
+            sd.append('"color":'+'"'+str(row[color])+'"')
+        for prop in props:
+            sd.append('"'+str(prop)+'":'+'"'+str(row[prop])+'"')
+        sample_data+= '{'+','.join(sd)+'},\n'
+        positions += '{"n_id":"'+str(row[node_id]) +'", "x":'+str(row[x])+',"y": '+str(row[y])+'},\n'
 
-    for index,row in nodes.iterrows():
-        sample_data+='{"name":"'+str(row[node_id]) +'", "size":'+str(np.log(row['n_entries']))+',"desc": "'+row[node_id]+'","n_entries":'+str(row['n_entries'])+'},\n' #industries
-        positions += '{"name":"'+str(row[node_id]) +'", "x":'+str(row['x'])+',"y": '+str(row['y'])+'},\n' #industries
     for index,row in edges.iterrows():
-        connections += '{"source": "'+str(int(row[source_id]))+'", "target": "'+str(int(row[target_id]))+'","strength":'+str(row['f'])+'},\n' #industries    
+        cn = ['"source":'+'"'+str(int(row[source_id]))+'"',
+              '"target":'+'"'+str(int(row[target_id]))+'"']
+        if weight_id is not None:
+            cn.append('"strength":'+str(row[weight_id]))
+        connections += '{'+','.join(cn)+'},\n'
 
-    sample_data = sample_data[:-2]+']\n'
-    positions = positions[:-2]+']\n'
-    connections = connections[:-2]+']\n'
+    sample_data = sample_data[:-2]+'\n]\n'
+    positions = positions[:-2]+'\n]\n'
+    connections = connections[:-2]+'\n]\n'
+    
+    viz = """var visualization = d3plus.viz()
+        .container("#viz")
+        .type("network")
+        .data(sample_data)
+        .nodes(positions)
+        .id("n_id")
+        """
+    if weight_id is not None:
+        viz += '.edges({"value": connections,"size": "strength"})\n'
+    else:
+        viz += '.edges({"value": connections})\n'
+        
+    if size_id is not None:
+        viz += '.size("size")\n'
+    
+    ttip = ['"n_id"']+['"'+str(p)+'"' for p in props]
+    if color is not None:
+        viz +='\t\t.color("color")\n'
+        ttip.append('"color"')
+    if size_id is not None:
+        ttip.append('"size"')
+    viz += '\t\t.tooltip('+'['+','.join(ttip)+']'+')\n'
+    viz += "\t\t.draw()"
 
     html = """<!doctype html>
     <meta charset="utf-8">
@@ -295,15 +349,9 @@ def build_html(nodes,edges,node_id = '',source_id = '',target_id='',**kwargs):
     // create sample dataset
     var sample_data = """ 
     html += sample_data + 'var positions =' + positions + 'var connections ='+connections
-    html += """var visualization = d3plus.viz()
-        .container("#viz")
-        .type("network")
-        .data(sample_data)
-        .nodes(positions)
-        .edges({"value": connections,"size": "strength"})
-        .size("size")
-        .id("name")
-        .tooltip(["desc","name", "size","n_entries"])
-        .draw()
-    </script>"""
+    html += viz +'\n</script>'
     return html
+
+
+
+
