@@ -268,7 +268,7 @@ def trade_data(classification='sitc'):
 
 
 
-def build_html(nodes,edges,node_id =None,source_id =None,target_id=None,size_id=None,weight_id = None,x=None,y=None,color=None,props = None,progress=True):
+def build_html(nodes,edges,node_id =None,source_id =None,target_id=None,size_id=None,weight_id = None,x=None,y=None,color=None,props = None,progress=True,max_colors=15):
     """Creates an html file with a d3plus visualization of the network from the dataframes nodes and edges.
         NEEDS A FUNCTION TO HANDLE WITH MANY DIFFERENT COLORS
     """
@@ -291,8 +291,8 @@ def build_html(nodes,edges,node_id =None,source_id =None,target_id=None,size_id=
         print 'props    :',props
 
     if color is not None:
-        if len(set(nodes[color].values))>=15:
-            raise NameError('Too many different colors, try using Jenks Natural Breaks')
+        if len(set(nodes[color].values))>max_colors:
+            raise NameError('Too many different colors, try using Jenks Natural Breaks: '+str(len(set(nodes[color].values))))
 
     sample_data = '[\n'
     positions = '[\n'
@@ -307,7 +307,7 @@ def build_html(nodes,edges,node_id =None,source_id =None,target_id=None,size_id=
         if color is not None:
             sd.append('"color":'+'"'+str(row[color])+'"')
         for prop in props:
-            sd.append('"'+str(prop)+'":'+'"'+str(row[prop])+'"')
+            sd.append('"'+str(prop)+'":'+'"'+unicode(row[prop])+'"')
         sample_data+= '{'+','.join(sd)+'},\n'
         positions += '{"n_id":"'+str(row[node_id]) +'", "x":'+str(row[x])+',"y": '+str(row[y])+'},\n'
 

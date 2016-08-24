@@ -1,6 +1,6 @@
 from pandas import DataFrame,merge
 from numpy import sqrt,mean,corrcoef
-import networkx as nx
+from networkx import Graph
 from functions import calculateRCA,CalculateComplexity,build_connected,build_html
 from functions_gt import get_pos
 from os import getcwd
@@ -163,12 +163,18 @@ class mcp(object):
         dis = dis[[side+'_x',side+'_y','fi']]
         self.projection_d[side] = dis
     
-    def projection(self,side,progress=True,trimmed=False):
+    def projection(self,side,progress=True,trimmed=False,as_network=False):
         """Used to access the projection of the bipartite network"""
-        if trimmed:
+        if trimmed|as_network:
             if self.projection_t[side] is None:
                 raise NameError('Projection not trimmed, please run \n>>> M.trim_projection(side,th)')
-            return self.projection_t[side]
+            if as_network:
+                P = self.projection_t[side][[side+'_x',side+'_y','fi']]
+                g = Graph()
+                g.add_edges_from(zip(P[side+'_x'].values.tolist(),P[side+'_y'].values.tolist(),[{'weight':w} for w in P['fi'].values.tolist()]))
+                return g
+            else:
+                return self.projection_t[side]
         else:
             if self.projection_d[side] is None:
                 if progress:
@@ -216,53 +222,49 @@ class mcp(object):
             raise NameError('Wrong label, choose between '+self.c+' and '+self.p)
         self.projection_th[side] = th
         self.projection_t[side] = build_connected(self.projection(side,progress=False),th,progress=False)
+        if 'x' in self._nodes[side].columns.values:
+            self._nodes[side] = self._nodes[side].drop(['x','y'],1)
+
 
     def _get_projection_pos(self,side,C=None):
         '''This function requires graph_tool'''
-        if (self.projection_t[self.c]is None)|(self.projection_t[self.p]is None):
+        if (self.projection_t[side]is None):
             raise NameError('Please run trim_projection(side,th) first')
 
-        pos_c = get_pos(self.projection_t[self.c][[self.c+'_x',self.c+'_y']],node_id=self.c,comms=True,progress=False,C=C)
-        pos_p = get_pos(self.projection_t[self.p][[self.p+'_x',self.p+'_y']],node_id=self.p,comms=True,progress=False,C=C)
-
-        if 'x' in self._nodes[self.c].columns.values:
-            self._nodes[self.c] = self._nodes[self.c].drop(['x','y'],1)
-        if 'x' in self._nodes[self.p].columns.values:
-            self._nodes[self.p] = self._nodes[self.p].drop(['x','y'],1)
-
-        self._nodes[self.c] = merge(self._nodes[self.c],pos_c)
-        self._nodes[self.p] = merge(self._nodes[self.p],pos_p)
+        pos = get_pos(self.projection_t[side][[side+'_x',side+'_y']],node_id=side,comms=True,progress=False,C=C)
+        
+        if 'x' in self._nodes[side].columns.values:
+            self._nodes[side] = self._nodes[side].drop(['x','y'],1)
+        if 'c' in self._nodes[side].columns.values:
+            self._nodes[side] = self._nodes[side].drop('c',1)
+        
+        self._nodes[side] = merge(self._nodes[side],pos)
 
 
-    def draw_projections(self,C=None,path='',show=True):
+    def draw_projection(self,side,C=None,path='',show=True,color=True,max_colors=15):
         '''path must be the absolut path, including the "/" symbol at the end. 
         This function requires graph_tool'''
-        if (self.projection_t[self.c]is None)|(self.projection_t[self.p]is None):
-            raise NameError( 'Please run \n>>>M.trim_projection(side,th)')
-        cs = self.projection_t[self.c][[self.c+'_x',self.c+'_y']]
-        ps = self.projection_t[self.p][[self.p+'_x',self.p+'_y']]
-        if 'x' not in self._nodes[self.c].columns.values:
-            self._get_projection_pos(self.c,C=C)
-        if 'x' not in self._nodes[self.p].columns.values:
-            self._get_projection_pos(self.p,C=C)
+        if (self.projection_t[side]is None):
+            raise NameError( 'Please run \n>>> M.trim_projection(side,th)')
+
+        cs = self.projection_t[side][[side+'_x',side+'_y']]
+        
+        if 'x' not in self._nodes[side].columns.values:
+            self._get_projection_pos(side,C=C)
 
         path = 'file://'+getcwd()+'/' if path == '' else path+'/'
 
-        props = [val for val in self._nodes[self.c].columns.values.tolist() if val not in set([self.c,self.c+'_index','x','y'])]
-        html = build_html(self._nodes[self.c],cs,node_id=self.c,source_id=self.c+'_x',target_id=self.c+'_y',color='c',props=props,progress=False)
-        out = self.c+'_'+self.name+'_th'+str(self.projection_th[self.c])+'.html' 
-        open(out,mode='w').write(html)
+        props = [val for val in self._nodes[side].columns.values.tolist() if val not in set([side,side+'_index','x','y'])]
+        if color:
+            html = build_html(self._nodes[side],cs,node_id=side,source_id=side+'_x',target_id=side+'_y',color='c',props=props,progress=False,max_colors=max_colors)
+        else:
+            html = build_html(self._nodes[side],cs,node_id=side,source_id=side+'_x',target_id=side+'_y',props=props,progress=False)
+        out = side+'_'+self.name+'_th'+str(self.projection_th[side])+'.html' 
+        open(out,mode='w').write(html.encode('utf-8'))
         if show:
             webbrowser.open(path+out)
             print 'OUT: ',path+out
     
-        props = [val for val in self._nodes[self.p].columns.values.tolist() if val not in set([self.p,self.p+'_index','x','y'])]
-        html = build_html(self._nodes[self.p],ps,node_id=self.p,source_id=self.p+'_x',target_id=self.p+'_y',color='c',props=props,progress=False)
-        out = self.p+'_'+self.name+'_th'+str(self.projection_th[self.p])+'.html' 
-        open(out,mode='w').write(html)
-        if show:
-            webbrowser.open(path+out)
-            print 'OUT: ',path+out
 
 
 
