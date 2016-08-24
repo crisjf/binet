@@ -210,7 +210,7 @@ class mcp(object):
     
     def projection(self,side,progress=True,trimmed=False,as_network=False):
         """Used to access the projection of the bipartite network"""
-        if trimmed|as_network:
+        if trimmed:
             if self.projection_t[side] is None:
                 raise NameError('Projection not trimmed, please run \n>>> M.trim_projection(side,th)')
             if as_network:
@@ -225,7 +225,13 @@ class mcp(object):
                 if progress:
                     print self.name +': ' + 'Calculating projection on '+str(side)
                 self.project(side)
-            return self.projection_d[side]
+            if as_network:
+                P = self.projection_d[side][[side+'_x',side+'_y','fi']]
+                g = Graph()
+                g.add_edges_from(zip(P[side+'_x'].values.tolist(),P[side+'_y'].values.tolist(),[{'weight':w} for w in P['fi'].values.tolist()]))
+                return g
+            else:
+                return self.projection_d[side]
 
 
     def to_csv(self,side,path='',trimmed=False):
