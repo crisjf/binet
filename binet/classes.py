@@ -7,6 +7,46 @@ from os import getcwd
 import webbrowser
 from copy import deepcopy
 
+
+
+class BiGraph(Graph):
+    def __init__(self,side=0,aside=1):
+        """Wrapper class for networkx Graph to deal with bipartite networks. 
+        It adds a property called 'side' to each node.
+        All the other functions work the same way."""
+        super(BiGraph,self).__init__()
+        self.side  = side
+        self.aside = aside
+    
+    def add_nodes_from(self,nodes,side):
+        if not hasattr(nodes[0], '__iter__'):
+            nns = []
+            for u in nodes:
+                d = {'side':side}
+                nns.append((u,d))
+        else:   
+            if len(nodes[0]) == 2:
+                nns = []
+                for u,d in nodes:
+                    if 'side' not in d.keys():
+                        d['side'] = side
+                    nns.append((u,d))
+            else:
+                raise NameError('Wrong input format')
+        super(BiGraph,self).add_nodes_from(nns)
+
+    def add_edges_from(self,edges):
+        self.add_nodes_from([u for u,v in edges],self.side)
+        self.add_nodes_from([v for u,v in edges],self.aside)
+        super(BiGraph,self).add_edges_from(edges)
+    
+    def nodes(self,side):
+        if side not in [self.side,self.aside]:
+            raise NameError('Wrong side label choose between '+str(self.side)+' and '+str(self.aside))
+        return [u for u in self.nodes_iter() if self.node[u]['side'] == side]
+
+
+
 class mcp(object):
     def __init__(self,data,name='',nodes_c=None,nodes_p=None,c='',p='',x=''):
         """
@@ -14,9 +54,10 @@ class mcp(object):
         c,p,x are the labels of the columns to use in the dataframe
         name is used to export to files
         """
-        self.name = name
-        self.net = None
-        self.data = None
+        self.name   = name
+        self.net    = None
+        self.G      = None
+        self.data   = None
         self._nodes = None
 
         self.M = None #Adjacency matrix placeholder
@@ -103,6 +144,10 @@ class mcp(object):
             if np != len(self._nodes[self.p]):
                 print '\t('+str(len(self._nodes[self.p])-np)+' nodes were dropped)\n'
             print 'N edges = '+str(len(self.net))
+
+        self.G = BiGraph(side=self.c,aside=self.p)
+        self.G.add_edges_from(zip(self.net[self.c].values,self.net[self.p].values))
+
 
     def nodes(self,side):
         if side not in [self.c,self.p]:
@@ -265,8 +310,6 @@ class mcp(object):
             webbrowser.open(path+out)
             print 'OUT: ',path+out
     
-
-
 
 
 
