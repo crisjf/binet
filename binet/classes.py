@@ -1,19 +1,26 @@
 from pandas import DataFrame,merge
 from numpy import sqrt,mean,corrcoef
-from networkx import Graph
+from networkx import Graph,set_node_attributes
 from functions import calculateRCA,CalculateComplexity,build_connected,build_html
 from functions_gt import get_pos
 from os import getcwd
 import webbrowser
 from copy import deepcopy
+from itertools import chain 
 
 
 
 class BiGraph(Graph):
     def __init__(self,side=0,aside=1):
-        """Wrapper class for networkx Graph to deal with bipartite networks. 
-        It adds a property called 'side' to each node.
-        All the other functions work the same way."""
+        """
+        Base class for undirected bipartite graphs.
+        Based on networkx Graph class, but adds a property called 'side' to each node, and modifies the methods to make the access of each side easier.
+
+        Parameters
+        ----------
+        side,aside : int or str
+            Tags for each side of the bipartite network.
+        """
         super(BiGraph,self).__init__()
         self.side  = side
         self.aside = aside
@@ -40,16 +47,179 @@ class BiGraph(Graph):
         self.add_nodes_from([v for u,v in edges],self.aside)
         super(BiGraph,self).add_edges_from(edges)
     
-    def nodes(self,side):
-        if side not in [self.side,self.aside]:
-            raise NameError('Wrong side label choose between '+str(self.side)+' and '+str(self.aside))
-        return [u for u in self.nodes_iter() if self.node[u]['side'] == side]
+    def nodes(self,side,as_df=False):
+        '''Will only return the properties when data is asked as a dataframe.'''
+        self._check_side(side)
+        if not as_df:
+            return [u for u in self.nodes_iter() if self.node[u]['side'] == side]
+        else:
+            nns = [super(BiGraph,self).nodes(data=True)]
+            properties = list(set(chain.from_iterable([d.keys() for u,d in nns if d['side']==side])))
+            properties.remove('side')
+            out = []
+            for u,d in nns:
+                if d['side'] == side:
+                    oout = [u]
+                    for prop in properties:
+                        try:
+                            oout+=[d[prop]]
+                        except:
+                            oout+=['NA']
+                    out.append(oout)
+            return DataFrame(out,columns=[side]+properties)
+
+    def degree(self,side,nbunch=None, weight=None,as_df=False):
+        self._check_side(side)
+        nbunch = self.nodes(side) if nbunch is None else list(set(self.nodes(side)).intersection(nbunch))
+        k = super(BiGraph,self).degree(nbunch=nbunch,weight=weight)
+        if not as_df:
+            return k
+        else:
+            return DataFrame(k.items(),columns=[side,'degree'])
+
+    def _check_side(self,side):
+        """Returns an error when the requested side is not found in the network."""
+        if side not in [self.aside,self.side]:
+            raise NameError('Wrong side label, choose between '+str(self.side)+' and '+str(self.aside))
+
+    def set_node_attributes(self,side,name,values):
+        '''values is a dictionary'''
+        self._check_side(side)
+        set_node_attributes(self,name,values)
+
+
+
+
+
+
+
+
+
 
 
 
 class mcp_new(BiGraph):
-    def __init__(self,side=0,aside=1):
-        pass
+    def __init__(self,c=None,p=None,name='',data=None,use=None,nodes_c=None,nodes_p=None):
+        """
+        Base class for undirected bipartite graphs.
+
+        Parameters
+        ----------
+        data : list or pandas DataFrame
+            Data to initialize graph. If data=None (default) an empty BiGraph is created.  
+            The data can be a list of edges in the form [(u,v,x),(u,v,x),...], or a pandas DataFrame.
+        use  : list ([c,p,x])
+            If data is a pandas DataFrame, use indicates what columns to use. 
+            If use=None (default) the first three columns are used.
+        c,p  : string
+            Name to refer to both sides of the network.
+        nodes_c,nodes_p : pandas DataFrame
+            Node data for each side. The first column must be the node key as it appears in data.
+
+        Examples
+        --------
+        
+        """
+        super(mcp_new,self).__init__()
+        self.c = c if c is not None else 'c'
+        self.p = p if p is not None else 'p'
+        self.side,self.aside  = self.c,self.p
+        self.data = None
+        self.load_links_data(data,use=use)
+        self.name = name
+        if nodes_c is not None:
+            self.load_nodes_data(self.c,nodes_c)
+        if nodes_p is not None:
+            self.load_nodes_data(self.p,nodes_p)
+        self.P = {self.c:None,self.p:None}
+
+    def load_links_data(self,data,use=None):
+        """Loads the data into the class. data can either be a DataFrame, in which case use says what columns to use use = [c,p,x], or a list of edges, [(c,p,x),(c,p,x),...]."""
+        if type(data) != type(DataFrame()):
+            data = DataFrame(data)
+            use = data.columns.values.tolist()[:3]
+        use = data.columns.values[:3].tolist() if use is None else use
+        newdata = data[use].rename(columns=dict(zip(use,[self.c,self.p,'x'])))
+        if self.data is not None:
+            newdata = concat([self.data,newdata])
+        newdata = newdata.groupby([self.c,self.p]).sum().reset_index()
+        self.data = newdata
+        self.add_nodes_from(self.data[self.c].values.tolist(),self.c)
+        self.add_nodes_from(self.data[self.p].values.tolist(),self.p)
+
+    def load_nodes_data(self,side,nodes_data,use=None):
+        """Adds node properties to the nodes."""
+        self._check_side(side)
+        nodes_data = merge(DataFrame(self.nodes(side),columns=[side]),nodes_data,how='left').fillna('NA')
+        use = nodes_data.columns.values.tolist() if use is None else use
+        for name in use[1:]:
+            values = dict(zip(nodes_data[use[0]].values,nodes_data[name].values))
+            self.set_node_attributes(side,name,values)
+
+    def _calculate_RCA(self):
+        self.data = merge(self.data,calculateRCA(self.data,c=self.c,p=self.p,x='x',shares=True).drop('x',1),how='left',left_on=[self.c,self.p],right_on=[self.c,self.p])
+
+    def build_net(self,RCA=True,th=1.,progress=True):
+        '''Builds the bipartite network with the given data.'''
+        self.remove_nodes_from(self.edges())
+        header = '' if self.name == '' else self.name + ': '
+        if progress:
+            print header+'Building bipartite network\nRCA = '+str(RCA)+'\nth = '+str(th)
+        if RCA:
+            if 'RCA' not in self.data.columns.values:
+                self._calculate_RCA()
+            net = self.data[self.data['RCA']>=th][[self.c,self.p]]
+        else:
+            print 'Warning: th should be provided.'
+            net = self.data[self.data[self.x]>=th][[self.c,self.p]]
+        if progress:
+            nc = len(set(net[self.c].values).intersection(set(self.nodes(self.c))))
+            np = len(set(net[self.p].values).intersection(set(self.nodes(self.p))))
+            print 'N nodes_c = '+str(nc)
+            if nc != len(self.nodes(self.c)):
+                print '\t('+str(len(self.nodes(self.c))-nc)+' nodes were dropped)\n'
+            print 'N nodes_p = '+str(np)
+            if np != len(self.nodes(self.p)):
+                print '\t('+str(len(self.nodes(self.p))-np)+' nodes were dropped)\n'
+            print 'N edges = '+str(len(net))
+        self.add_edges_from(zip(net[self.c].values,net[self.p].values))
+
+    def filter_nodes(self,side,node_list,keep=True):
+        '''
+        Filters nodes from the data. 
+        Warning: It drops all edges from the bipartite network.
+
+        Parameters
+        ----------
+        side      : self.c or self.p
+            Side to operate on.
+        node_list : list
+            List of nodes to drop/keep.
+        keep      : boolean (True)
+            If True it will keep the nodes in node_list and drop everything else. 
+            If False it will drop the nodes in node_list and keep everything else.
+        '''
+        self._check_side(side)
+        if keep:
+            d = list(set(self.nodes(side)).difference(set(node_list)))
+            k = node_list[:]
+        else:
+            d = node_list[:]
+            k = list(set(self.nodes(side)).difference(set(node_list)))
+        self.remove_nodes_from(d)
+        self.data = merge(DataFrame(k,columns[side]),self.data,how='left')
+        if 'RCA' in self.data.columns.values:
+            self.data = self.data.drop('RCA',1)
+        self.remove_nodes_from(self.edges())
+
+
+
+
+
+
+
+
+
 
 
 class mcp(object):
