@@ -47,6 +47,11 @@ class BiGraph(Graph):
 
 
 
+class mcp_new(BiGraph):
+    def __init__(self,side=0,aside=1):
+        pass
+
+
 class mcp(object):
     def __init__(self,data,name='',nodes_c=None,nodes_p=None,c='',p='',x=''):
         """
@@ -66,6 +71,8 @@ class mcp(object):
         self.projection_d = {self.c:None,self.p:None}
         self.projection_t = {self.c:None,self.p:None}
         self.projection_th = {self.c:None,self.p:None}
+
+        self.size = {self.c:None,self.p:None}
         
     def load_links_data(self,data,c='',p='',x=''):
         """Loads the data into the class.
@@ -150,8 +157,7 @@ class mcp(object):
 
 
     def nodes(self,side):
-        if side not in [self.c,self.p]:
-            raise NameError('Wrong label, choose between '+self.c+' and '+self.p)
+        self._check_side(side)
         return self._nodes[side].drop(side+'_index',1)
 
     def edges(self):
@@ -160,9 +166,10 @@ class mcp(object):
         return self.net[[self.c,self.p]]
 
     def avg_inds(self,side):
-        if side not in [self.c,self.p]:
-            raise NameError('Wrong label, choose between '+self.c+' and '+self.p)
-        """For each node on side, calculates the average of a given indicator in aside for the bipartite network"""
+        """Calculates indicators for one side as average over the network of indicators of the other side.
+        For each node on side, calculates the average of a given indicator in aside for the bipartite network.
+        """
+        self._check_side(side)
         if self.net is None:
             raise NameError('No network defined. Please run \n>>> build_net()')
         aside = self.c if side == self.p else self.p
@@ -187,8 +194,7 @@ class mcp(object):
 
     def project(self,side):
         """Builds the projection of the bipartite network on to the chosen side."""
-        if side not in [self.c,self.p]:
-            raise NameError('Wrong label, choose between '+self.c+' and '+self.p)
+        self._check_side(side)
         if self.net is None:
             self.build_net()
         
@@ -234,17 +240,20 @@ class mcp(object):
                 return self.projection_d[side]
 
 
-    def to_csv(self,side,path='',trimmed=False):
+    def to_csv(self,side=None,path='',trimmed=False):
         '''Dumps one of the projections into two csv files (name_side_nodes.csv,name_side_edges.csv).'''
-        if self.projection_d[side] is None:
-            raise NameError('No projection available. Please run \n>>> M.projection(side)')
-        self.nodes(side).to_csv(path+self.name+'_'+side+'_nodes.csv')
-        if trimmed:
-            if self.projection_t[side] is None:
-                raise NameError('Projection not trimmed. Please run \n>>> M.trim_projection(side,th)')
-            self.projection(side,trimmed=True).to_csv(path+self.name+'_'+side+'_th'+str(self.projection_th[side])+'_edges.csv')
+        if side is None:
+            self.net.to_csv(path+self.name+'_bipartite_edges.csv',index=False)
         else:
-            self.projection(side).to_csv(path+self.name+'_'+side+'_edges.csv')
+            if self.projection_d[side] is None:
+                raise NameError('No projection available. Please run \n>>> M.projection(side)')
+            self.nodes(side).to_csv(path+self.name+'_'+side+'_nodes.csv')
+            if trimmed:
+                if self.projection_t[side] is None:
+                    raise NameError('Projection not trimmed. Please run \n>>> M.trim_projection(side,th)')
+                self.projection(side,trimmed=True).to_csv(path+self.name+'_'+side+'_th'+str(self.projection_th[side])+'_edges.csv')
+            else:
+                self.projection(side).to_csv(path+self.name+'_'+side+'_edges.csv')
 
     def _as_matrix(self):
         '''Returns the network as an adjacency matrix. Useful to calculate complexity.'''
@@ -269,8 +278,7 @@ class mcp(object):
         return ECI,PCI
 
     def trim_projection(self,side,th):
-        if side not in [self.c,self.p]:
-            raise NameError('Wrong label, choose between '+self.c+' and '+self.p)
+        self._check_side(side)
         self.projection_th[side] = th
         self.projection_t[side] = build_connected(self.projection(side,progress=False),th,progress=False)
         if 'x' in self._nodes[side].columns.values:
@@ -315,15 +323,48 @@ class mcp(object):
         if show:
             webbrowser.open(path+out)
             print 'OUT: ',path+out
-    
 
+    def _get_size(self,side):
+        g = self.projection(side,as_network=True)
+        F = {}
+        for u in g.nodes():
+            w = 0
+            for v in g.neighbors(u):
+                ww = g.get_edge_data(u,v)
+                if ww is not None:
+                    w += ww['weight']
+            F[u] = w
+        self.size[side] = F
 
+    def _check_side(self,side):
+        if side not in [self.c,self.p]:
+            raise NameError('Wrong side label, choose between '+self.c+' and '+self.p)
 
+    def densities(self,side,m,progress=True):
+        '''m must be another object of type mcp'''
+        self._check_side(side)
+        if self.size[side] is None:
+            self._get_size(side)
+        F = self.size[side]
+        aside = self.c if side == self.p else self.p
+        g = self.projection(side,as_network=True)
 
+        if progress:
+            print 'Calculating densities based on ' + side +' space'
 
-
-
-
+        W = []
+        for c in self.G.nodes(aside):
+            f = {}
+            ps = set(m.G.neighbors(c))
+            for u in g.nodes():
+                w = 0.
+                for v in ps:
+                    ww = g.get_edge_data(u,v)
+                    if ww is not None:
+                        w += ww['weight']
+                f[u] = w
+            W += [(c,u,f[u]/F[u],(u in ps)) for u in g.nodes()]
+        return DataFrame(W,columns=[aside,side,'w','mcp'])
 
 
 
