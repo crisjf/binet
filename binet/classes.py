@@ -1,6 +1,6 @@
 from pandas import DataFrame,merge
 from numpy import sqrt,mean,corrcoef
-from networkx import Graph,set_node_attributes
+from networkx import Graph,set_node_attributes,set_edge_attributes
 from functions import calculateRCA,CalculateComplexity,build_connected,build_html
 from functions_gt import get_pos
 from os import getcwd
@@ -129,6 +129,20 @@ class BiGraph(Graph):
         vals = {val:values[val] for val in ns}
         set_node_attributes(self,name,vals)
 
+    def set_edge_attributes(self,name,values):
+        """Set edge attributes from dictionary of edge tuples and values.
+
+        Parameters
+        ----------
+        name : string
+            Attribute name
+        values : dict
+            Dictionary of attribute values keyed by edge (tuple). 
+            The keys must be tuples of the form (u, v). 
+            If values is not a dictionary, then it is treated as a single attribute value that is then applied to every edge.
+        """
+        set_edge_attributes(self,name,values)
+
     def project(self,side):
         """
         Builds the projection of the bipartite network on to the chosen side.
@@ -225,7 +239,19 @@ class mcp_new(BiGraph):
             print 'Warning: Column '+use[1]+' used for nodes type '+self.p
 
     def load_links_data(self,data,use=None):
-        """Loads the data into the class. data can either be a DataFrame, in which case use says what columns to use use = [c,p,x], or a list of edges, [(c,p,x),(c,p,x),...]."""
+        """
+        Loads the data into the class. 
+
+        Parameters
+        ----------
+        data : list or DataFrame
+            Data on which to build the network.
+            If data is a list, it should have the form [(c,p,x),...].
+        use  : list
+            List of columns to use as nodes ids and weight.
+            use has the form [c,p,x].
+            If use is not provided, then it will use the first three columns of the DataFrame in the order c,p,x.
+        """
         if type(data) != type(DataFrame()):
             data = DataFrame(data)
             use = data.columns.values.tolist()[:3]
@@ -240,8 +266,20 @@ class mcp_new(BiGraph):
         self.add_nodes_from(self.data[self.p].values.tolist(),self.p)
 
     def load_nodes_data(self,side,nodes_data,use=None):
-        """Adds node properties to the nodes.
-        use   : has the first element as the id of the node, if it doesn't come with use it will look for a column named side
+        """
+        Adds properties to the nodes.
+
+        Parameters
+        ----------
+        side : int or str
+            Tags for each side of the bipartite network.
+        nodes_data : pandas DataFrame
+            DataFrame with node id in one column and node properties as other columns.
+        use : list
+            Columns of nodes_data to use.
+            The first element of the list has the label of the column with the node id.
+            The other elements are the labels of the columns to use.
+            If use is not provided, it will look for a column named side.
         """
         self._check_side(side)
         use = [side]+nodes_data.drop(side,1).columns.values.tolist() if use is None else use
@@ -251,10 +289,9 @@ class mcp_new(BiGraph):
             self.set_node_attributes(side,name,values)
 
     def _calculate_RCA(self):
-        """RCA AND X SHOULD BE AN EDGE PROPERY!!"""
         self.data = merge(self.data,calculateRCA(self.data,c=self.c,p=self.p,x='x',shares=True).drop('x',1),how='left',left_on=[self.c,self.p],right_on=[self.c,self.p])
 
-    def build_net(self,RCA=True,th=1.,progress=False):
+    def build_net(self,RCA=True,th=1.):
         '''
         Builds the bipartite network with the given data.
         Warning: If RCA is False then th should be provided.
@@ -265,32 +302,21 @@ class mcp_new(BiGraph):
             Whether to use RCA filtering or regular filtering.
         th       : float (default=1)
             Threshold to use. If RCA=True is the RCA threshold, if RCA=False is the flow threshold.
-        progress : boolean (False)
-            Whether to display the progress or not
-
         '''
         self.remove_nodes_from(self.edges())
         header = '' if self.name == '' else self.name + ': '
-        if progress:
-            print header+'Building bipartite network\nRCA = '+str(RCA)+'\nth = '+str(th)
+        if 'RCA' not in self.data.columns.values:
+            self._calculate_RCA()
         if RCA:
-            if 'RCA' not in self.data.columns.values:
-                self._calculate_RCA()
-            net = self.data[self.data['RCA']>=th][[self.c,self.p]]
+            net = self.data[self.data['RCA']>=th][[self.c,self.p,'RCA',self.x]]
         else:
             print 'Warning: th should be provided.'
-            net = self.data[self.data[self.x]>=th][[self.c,self.p]]
-        if progress:
-            nc = len(set(net[self.c].values).intersection(set(self.nodes(self.c))))
-            np = len(set(net[self.p].values).intersection(set(self.nodes(self.p))))
-            print 'N nodes_c = '+str(nc)
-            if nc != len(self.nodes(self.c)):
-                print '\t('+str(len(self.nodes(self.c))-nc)+' nodes were dropped)\n'
-            print 'N nodes_p = '+str(np)
-            if np != len(self.nodes(self.p)):
-                print '\t('+str(len(self.nodes(self.p))-np)+' nodes were dropped)\n'
-            print 'N edges = '+str(len(net))
+            net = self.data[self.data[self.x]>=th][[self.c,self.p,'RCA',self.x]]
         self.add_edges_from(zip(net[self.c].values,net[self.p].values))
+        self.set_edge_attributes('RCA',dict(zip(zip(net[self.c].values,net[self.p].values),net['RCA'].values)))
+        self.set_edge_attributes(self.x,dict(zip(zip(net[self.c].values,net[self.p].values),net[self.x].values)))
+
+        
 
     def filter_nodes(self,side,node_list,keep=True):
         '''
