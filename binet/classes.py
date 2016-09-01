@@ -76,6 +76,26 @@ class BiGraph(Graph):
             return DataFrame(es,columns=[self.side,self.aside])
 
     def degree(self,side,nbunch=None, weight=None,as_df=False):
+        '''
+        Return degree of single node or of nbunch of nodes.
+        If nbunch is ommitted, then return degrees of all nodes.
+
+        Parameters
+        ----------
+        side   : int or str
+            Tags for each side of the bipartite network.
+        nbunch : list or node id (default=all nodes)
+            Nodes to get the degree of.
+        weight : str
+            Edge property to use as weight.
+        as_df  : boolean (False)
+            If True it returns the degrees in a pandas DataFrame.
+
+        Returns
+        -------
+        k : dictionary or DataFrame
+            Dictionary with node id as keys or DataFrame with two columns (when as_df is set to True)
+        '''
         self._check_side(side)
         nbunch = self.nodes(side) if nbunch is None else list(set(self.nodes(side)).intersection(nbunch))
         k = super(BiGraph,self).degree(nbunch=nbunch,weight=weight)
@@ -90,9 +110,24 @@ class BiGraph(Graph):
             raise NameError('Wrong side label, choose between '+str(self.side)+' and '+str(self.aside))
 
     def set_node_attributes(self,side,name,values):
-        '''values is a dictionary'''
+        '''
+        Set node of type side attributes from dictionary of nodes and values.
+        Only sets one attribute at a time.
+
+        Parameters
+        ----------
+        name  : string
+            Attribute name
+        side  : int or str
+            Tags for each side of the bipartite network.
+        values: dict
+            Dictionary of attribute values keyed by node. 
+            Nodes that do not belong to side will not be considered.
+        '''
         self._check_side(side)
-        set_node_attributes(self,name,values)
+        ns   = set(values.keys()).intersection(set(self.nodes(side)))
+        vals = {val:values[val] for val in ns}
+        set_node_attributes(self,name,vals)
 
     def project(self,side):
         """
@@ -216,6 +251,7 @@ class mcp_new(BiGraph):
             self.set_node_attributes(side,name,values)
 
     def _calculate_RCA(self):
+        """RCA AND X SHOULD BE AN EDGE PROPERY!!"""
         self.data = merge(self.data,calculateRCA(self.data,c=self.c,p=self.p,x='x',shares=True).drop('x',1),how='left',left_on=[self.c,self.p],right_on=[self.c,self.p])
 
     def build_net(self,RCA=True,th=1.,progress=False):
@@ -283,6 +319,8 @@ class mcp_new(BiGraph):
         if 'RCA' in self.data.columns.values:
             self.data = self.data.drop('RCA',1)
         self.remove_nodes_from(self.edges())
+
+    #def avg_inds(self,side):
 
 
 
