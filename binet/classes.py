@@ -53,7 +53,7 @@ class BiGraph(Graph):
         if not as_df:
             return [u for u in self.nodes_iter() if self.node[u]['side'] == side]
         else:
-            nns = [super(BiGraph,self).nodes(data=True)]
+            nns = super(BiGraph,self).nodes(data=True)
             properties = list(set(chain.from_iterable([d.keys() for u,d in nns if d['side']==side])))
             properties.remove('side')
             out = []
@@ -67,6 +67,13 @@ class BiGraph(Graph):
                             oout+=['NA']
                     out.append(oout)
             return DataFrame(out,columns=[side]+properties)
+
+    def edges(self,nbunch=None, data=False, default=None,as_df=False):
+        if not as_df:
+            return super(BiGraph,self).edges(nbunch=None, data=False, default=None)
+        else:
+            es = list(super(BiGraph,self).edges(nbunch=None, data=False, default=None))
+            return DataFrame(es,columns=[self.side,self.aside])
 
     def degree(self,side,nbunch=None, weight=None,as_df=False):
         self._check_side(side)
@@ -86,6 +93,49 @@ class BiGraph(Graph):
         '''values is a dictionary'''
         self._check_side(side)
         set_node_attributes(self,name,values)
+
+    def project(self,side):
+        """
+        Builds the projection of the bipartite network on to the chosen side.
+        The projection is done using conditional probability.
+
+        Parameters
+        ----------
+        side : int or str
+            Tags for each side of the bipartite network.
+        """
+        self._check_side(side)
+        aside = self.side if side == self.aside else self.aside
+        net = self.edges(as_df=True)[[side,aside]]
+        dis = merge(net,net,how='inner',left_on=aside,right_on=aside).groupby([side+'_x',side+'_y']).count().reset_index().rename(columns={aside:'n_both'})
+        nodes = merge(self.nodes(side,as_df=True)[[side]].reset_index().rename(columns={'index':side+'_index'}),DataFrame(self.degree(side).items(),columns=[side,'n']))
+        dis = merge(dis,nodes,how='left',right_on=side,left_on=side+'_x').drop(side,1)
+        dis = merge(dis,nodes,how='left',right_on=side,left_on=side+'_y').drop(side,1)
+        dis = dis[dis[side+'_index_x']>dis[side+'_index_y']].drop([side+'_index_x',side+'_index_y'],1)
+
+        dis['p_x'] = dis['n_both']/dis['n_x'].astype(float)
+        dis['p_y'] = dis['n_both']/dis['n_y'].astype(float)
+        dis['fi'] = dis[['p_x','p_y']].min(1)
+        dis = dis[[side+'_x',side+'_y','fi']]
+        self.P[side].add_weighted_edges_from([val[1:] for val in dis.itertuples()])
+
+    def projection(self,side):
+        """
+        Returns the network projection (will calculate if it does not exist).
+
+        Parameters
+        ----------
+        side : int or str
+            Tags for each side of the bipartite network.
+
+        Returns
+        ----------
+        P : networkx.Graph() object
+            Weighted betwork containing the projected network.
+        """
+        if self.P[side] is None:
+            self.project(side)
+        return self.P[side]
 
 
 
@@ -131,7 +181,13 @@ class mcp_new(BiGraph):
             self.load_nodes_data(self.c,nodes_c)
         if nodes_p is not None:
             self.load_nodes_data(self.p,nodes_p)
-        self.P = {self.c:None,self.p:None}
+        self.P = {self.c:Graph(),self.p:Graph()}
+
+    def _check_use(self,use,data):
+        if (self.c in data.columns.values)&(use[0] != self.c):
+            print 'Warning: Column '+use[0]+' used for nodes type '+self.c
+        if (self.p in data.columns.values)&(use[1] != self.p):
+            print 'Warning: Column '+use[1]+' used for nodes type '+self.p
 
     def load_links_data(self,data,use=None):
         """Loads the data into the class. data can either be a DataFrame, in which case use says what columns to use use = [c,p,x], or a list of edges, [(c,p,x),(c,p,x),...]."""
@@ -139,6 +195,7 @@ class mcp_new(BiGraph):
             data = DataFrame(data)
             use = data.columns.values.tolist()[:3]
         use = data.columns.values[:3].tolist() if use is None else use
+        self._check_use(use,data)
         newdata = data[use].rename(columns=dict(zip(use,[self.c,self.p,'x'])))
         if self.data is not None:
             newdata = concat([self.data,newdata])
@@ -148,10 +205,12 @@ class mcp_new(BiGraph):
         self.add_nodes_from(self.data[self.p].values.tolist(),self.p)
 
     def load_nodes_data(self,side,nodes_data,use=None):
-        """Adds node properties to the nodes."""
+        """Adds node properties to the nodes.
+        use   : has the first element as the id of the node, if it doesn't come with use it will look for a column named side
+        """
         self._check_side(side)
-        nodes_data = merge(DataFrame(self.nodes(side),columns=[side]),nodes_data,how='left').fillna('NA')
-        use = nodes_data.columns.values.tolist() if use is None else use
+        use = [side]+nodes_data.drop(side,1).columns.values.tolist() if use is None else use
+        nodes_data = merge(self.nodes(side,as_df=True)[[side]],nodes_data[use],how='left').fillna('NA')[use]
         for name in use[1:]:
             values = dict(zip(nodes_data[use[0]].values,nodes_data[name].values))
             self.set_node_attributes(side,name,values)
@@ -159,8 +218,21 @@ class mcp_new(BiGraph):
     def _calculate_RCA(self):
         self.data = merge(self.data,calculateRCA(self.data,c=self.c,p=self.p,x='x',shares=True).drop('x',1),how='left',left_on=[self.c,self.p],right_on=[self.c,self.p])
 
-    def build_net(self,RCA=True,th=1.,progress=True):
-        '''Builds the bipartite network with the given data.'''
+    def build_net(self,RCA=True,th=1.,progress=False):
+        '''
+        Builds the bipartite network with the given data.
+        Warning: If RCA is False then th should be provided.
+
+        Parameters
+        ----------
+        RCA      : boolean (True)
+            Whether to use RCA filtering or regular filtering.
+        th       : float (default=1)
+            Threshold to use. If RCA=True is the RCA threshold, if RCA=False is the flow threshold.
+        progress : boolean (False)
+            Whether to display the progress or not
+
+        '''
         self.remove_nodes_from(self.edges())
         header = '' if self.name == '' else self.name + ': '
         if progress:
@@ -446,6 +518,9 @@ class mcp(object):
         self._nodes[self.c] = merge(self._nodes[self.c],ECI,how = 'left',left_on=self.c,right_on=self.c)
         self._nodes[self.p] = merge(self._nodes[self.p],PCI,how = 'left',left_on=self.p,right_on=self.p)
         return ECI,PCI
+
+
+
 
     def trim_projection(self,side,th):
         self._check_side(side)
