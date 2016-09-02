@@ -2,7 +2,7 @@ from pandas import DataFrame,merge
 from numpy import sqrt,mean,corrcoef
 from networkx import Graph,set_node_attributes,set_edge_attributes
 from functions import calculateRCA,CalculateComplexity,build_connected,build_html
-from functions_gt import get_pos
+#from functions_gt import get_pos
 from os import getcwd
 import webbrowser
 from copy import deepcopy
@@ -620,7 +620,7 @@ class mcp(object):
         '''This function requires graph_tool'''
         if (self.projection_t[side]is None):
             raise NameError('Please run trim_projection(side,th) first')
-
+        
         pos = get_pos(self.projection_t[side][[side+'_x',side+'_y']],node_id=side,comms=True,progress=False,C=C)
         
         if 'x' in self._nodes[side].columns.values:
