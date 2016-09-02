@@ -83,7 +83,6 @@ def build_connected(dis_,th,s=None,t=None,w=None,directed=False,progress=True):
     Notes
     -----
     Set the threshold low to begin with.
-
     """
     s = dis_.columns.values[0] if s is None else s
     t = dis_.columns.values[1] if t is None else t

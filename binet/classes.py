@@ -346,8 +346,37 @@ class mcp_new(BiGraph):
             self.data = self.data.drop('RCA',1)
         self.remove_nodes_from(self.edges())
 
-    #def avg_inds(self,side):
+    def avg_inds(self,side):
+        """ THIS IS NOT WORKING YET!!!
+        Calculates indicators for one side as average over the network of indicators of the other side.
+        For each node on side, calculates the average of a given indicator in aside for the bipartite network.
+        """
+        self._check_side(side)
+        if len(self.edges()) is None:
+            raise NameError('Empty network found. Please run \n>>> build_net()')
 
+
+        aside = self.c if side == self.p else self.p
+        ns = self.nodes(side,as_df=True)
+
+        inds = []
+        for ind in ns.drop(side,1).columns.values:
+            try:
+                mean(ns[ind].values)
+                inds.append(ind)
+            except:
+                pass
+        if len(inds) == 0:
+            print self.name + "No indicators to average"
+            
+        for ind in inds:
+            print self.name + 'Calculating average for ',ind
+            av_ind = merge(self.net,self.data,how='left',left_on=[side,aside],right_on=[side,aside])[[side,aside,'s_'+side]]
+            av_ind = merge(av_ind,self._nodes[side][[side,ind]].dropna(),how='inner',left_on=side,right_on=side)
+            av_ind = merge(av_ind,av_ind[[aside,'s_'+side]].groupby(aside).sum().reset_index().rename(columns={'s_'+side:'N_'+aside}),
+                how='inner',left_on=aside,right_on=aside)
+            av_ind['avg_'+ind] = av_ind['s_'+side]*av_ind[ind]/av_ind['N_'+aside]
+            self._nodes[aside] = merge(self._nodes[aside],av_ind[[aside,'avg_'+ind]].groupby(aside).sum().reset_index(),how='left',left_on=aside,right_on=aside)
 
 
 
@@ -583,9 +612,6 @@ class mcp(object):
         self._nodes[self.p] = merge(self._nodes[self.p],PCI,how = 'left',left_on=self.p,right_on=self.p)
         return ECI,PCI
 
-
-
-
     def trim_projection(self,side,th):
         self._check_side(side)
         self.projection_th[side] = th
@@ -674,14 +700,6 @@ class mcp(object):
                 f[u] = w
             W += [(c,u,f[u]/F[u],(u in ps)) for u in g.nodes()]
         return DataFrame(W,columns=[aside,side,'w','mcp'])
-
-
-
-
-
-
-
-
 
 
 
