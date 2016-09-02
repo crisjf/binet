@@ -1,5 +1,8 @@
-from graph_tool.all import Graph,minimize_blockmodel_dl
-from graph_tool.draw import sfdp_layout
+try:
+    from graph_tool.all import Graph,minimize_blockmodel_dl
+    from graph_tool.draw import sfdp_layout
+except:
+    print 'Warning: No module named graph_tool found.'
 from pandas import DataFrame,merge
 #Note: I use a separate file because of conflicts between networkx and graph_tool
 
