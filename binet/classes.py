@@ -383,10 +383,6 @@ class mcp_new(BiGraph):
 
 
 
-
-
-
-
 class mcp(object):
     def __init__(self,data,name='',nodes_c=None,nodes_p=None,c='',p='',x=''):
         """
