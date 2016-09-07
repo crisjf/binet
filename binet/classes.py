@@ -370,19 +370,38 @@ class mcp_new(BiGraph):
             self._nodes[aside] = merge(self._nodes[aside],av_ind[[aside,'avg_'+ind]].groupby(aside).sum().reset_index(),how='left',left_on=aside,right_on=aside)
 
     def to_csv(self,side=None,th=None,path='',th2=None):
-        '''Dumps one of the projections into two csv files (name_side_nodes.csv,name_side_edges.csv).'''
+        '''Dumps one of the projections into two csv files (name_side_nodes.csv,name_side_edges.csv).
+        
+        Parameters
+        ----------
+        side : str
+            Side to save the projection. If None it will save the bipartite network.
+        th : float
+            Threshold to populate the MST with.
+        th2 : float (optional)
+            Lower threshold to the strength of the links.
+        path : str
+            Path to save the files to.
+
+        Returns
+        -------
+        _edges.csv : file
+            List of edges
+        _nodes.csv : file
+            List of nodes
+        '''
         if (th is None)&(side is not None):
-            raise NameError('Must provid a threshold')
+            raise NameError('Must provide a threshold')
         if side is None:
             DataFrame(self.edges(),columns=[self.c,self.p]).to_csv(path+self.name+'_bipartite_edges.csv',index=False)
             self.nodes(self.c,as_df=True).to_csv(path+self.name+'_'+side+'_nodes.csv')
         else:
             dis = DataFrame([(u,v,self.P[side].get_edge_data(u,v)['weight']) for u,v in self.P[side].edges()],columns=[side+'_x',side+'_y','fi'])
             dis = build_connected(dis,th,progress=False)
-            if th2 is not None:
+            if th2 is None:
                 dis.to_csv(path+self.name+'_'+side+'_th'+str(th)+'_edges.csv')
-            else:    
-                dis[dis['fi']>=th2].to_csv(path+self.name+'_'+side+'_th'+str(th)+'_edges.csv')
+            else:
+                dis[dis['fi']>=th2].to_csv(path+self.name+'_'+side+'_th'+str(th)+'_th2'+str(th2)+'_edges.csv')
             self.nodes(side,as_df=True).to_csv(path+self.name+'_'+side+'_nodes.csv')
 
 
