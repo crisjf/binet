@@ -398,6 +398,7 @@ class mcp_new(BiGraph):
         else:
             dis = DataFrame([(u,v,self.P[side].get_edge_data(u,v)['weight']) for u,v in self.P[side].edges()],columns=[side+'_x',side+'_y','fi'])
             dis = build_connected(dis,th,progress=False)
+            dis['fi'] = dis['fi'].astype(float)
             if th2 is None:
                 dis.to_csv(path+self.name+'_'+side+'_th'+str(th)+'_edges.csv')
             else:
