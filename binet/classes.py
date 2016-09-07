@@ -369,13 +369,20 @@ class mcp_new(BiGraph):
             av_ind['avg_'+ind] = av_ind['s_'+side]*av_ind[ind]/av_ind['N_'+aside]
             self._nodes[aside] = merge(self._nodes[aside],av_ind[[aside,'avg_'+ind]].groupby(aside).sum().reset_index(),how='left',left_on=aside,right_on=aside)
 
-    def to_csv(self,side=None,th=0.,path=''):
+    def to_csv(self,side=None,th=None,path='',th2=None):
         '''Dumps one of the projections into two csv files (name_side_nodes.csv,name_side_edges.csv).'''
+        if (th is None)&(side is not None):
+            raise NameError('Must provid a threshold')
         if side is None:
             DataFrame(self.edges(),columns=[self.c,self.p]).to_csv(path+self.name+'_bipartite_edges.csv',index=False)
+            self.nodes(self.c,as_df=True).to_csv(path+self.name+'_'+side+'_nodes.csv')
         else:
             dis = DataFrame([(u,v,self.P[side].get_edge_data(u,v)['weight']) for u,v in self.P[side].edges()],columns=[side+'_x',side+'_y','fi'])
-            build_connected(dis,th,progress=False).to_csv(path+self.name+'_'+side+'_th'+str(th)+'_edges.csv')
+            dis = build_connected(dis,th,progress=False)
+            if th2 is not None:
+                dis.to_csv(path+self.name+'_'+side+'_th'+str(th)+'_edges.csv')
+            else:    
+                dis[dis['fi']>=th2].to_csv(path+self.name+'_'+side+'_th'+str(th)+'_edges.csv')
             self.nodes(side,as_df=True).to_csv(path+self.name+'_'+side+'_nodes.csv')
 
 
