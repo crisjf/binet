@@ -308,13 +308,13 @@ class mcp_new(BiGraph):
         if 'RCA' not in self.data.columns.values:
             self._calculate_RCA()
         if RCA:
-            net = self.data[self.data['RCA']>=th][[self.c,self.p,'RCA',self.x]]
+            net = self.data[self.data['RCA']>=th][[self.c,self.p,'RCA','x']]
         else:
             print 'Warning: th should be provided.'
-            net = self.data[self.data[self.x]>=th][[self.c,self.p,'RCA',self.x]]
+            net = self.data[self.data['x']>=th][[self.c,self.p,'RCA','x']]
         self.add_edges_from(zip(net[self.c].values,net[self.p].values))
         self.set_edge_attributes('RCA',dict(zip(zip(net[self.c].values,net[self.p].values),net['RCA'].values)))
-        self.set_edge_attributes(self.x,dict(zip(zip(net[self.c].values,net[self.p].values),net[self.x].values)))
+        self.set_edge_attributes('x',dict(zip(zip(net[self.c].values,net[self.p].values),net['x'].values)))
 
         
 
