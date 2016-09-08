@@ -168,6 +168,7 @@ class BiGraph(Graph):
         dis = dis[[side+'_x',side+'_y','fi']]
         self.P[side].add_weighted_edges_from([val[1:] for val in dis.itertuples()])
 
+
     def projection(self,side):
         """
         Returns the network projection (will calculate if it does not exist).
@@ -404,9 +405,6 @@ class mcp_new(BiGraph):
             else:
                 dis[dis['fi']>=th2].to_csv(path+self.name+'_'+side+'_th'+str(th)+'_th2'+str(th2)+'_edges.csv')
             self.nodes(side,as_df=True).to_csv(path+self.name+'_'+side+'_nodes.csv')
-        return dis
-
-
 
 
 class mcp(object):

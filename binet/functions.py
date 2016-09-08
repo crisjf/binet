@@ -99,15 +99,15 @@ def build_connected(dis_,th,s=None,t=None,w=None,directed=False,progress=True):
 
     if not directed:
         G = Graph()    
-        G.add_edges_from(zip(dis[s].values,dis[t].values,[{'weight':f} for f in dis[w]]))
+        G.add_edges_from(zip(dis[s].values,dis[t].values,[{'weight':-f} for f in dis[w]]))
         T = minimum_spanning_tree(G)
-        T.add_edges_from([(u,v,{'weight':we}) for u,v,we in dis[dis[w]>=th].values.tolist()])
+        T.add_edges_from([(u,v,{'weight':-we}) for u,v,we in dis[dis[w]>=th].values.tolist()])
         if progress:
             print 'N edges:',len(T.edges())
             print 'N nodes:',len(T.nodes())
         out = []
         for u,v in T.edges():
-            out.append((u,v,T.get_edge_data(u, v)['weight']))
+            out.append((u,v,T.-get_edge_data(u, v)['weight']))
         edges = DataFrame(out,columns=[s,t,w])
         edges[s] = edges[s].astype(dis_.dtypes[s])
         edges[t] = edges[t].astype(dis_.dtypes[t])
