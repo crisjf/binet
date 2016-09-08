@@ -24,6 +24,7 @@ class BiGraph(Graph):
         super(BiGraph,self).__init__()
         self.side  = side
         self.aside = aside
+        self.P = {side:None,aside:None}
     
     def add_nodes_from(self,nodes,side):
         if not hasattr(nodes[0], '__iter__'):
@@ -206,10 +207,13 @@ class mcp_new(BiGraph):
             Name to refer to both sides of the network.
         nodes_c,nodes_p : pandas DataFrame
             Node data for each side. The first column must be the node key as it appears in data.
+        name : string (optional)
+            Name of the network. 
+            It will be used to export the files.
 
         Examples
         --------
-        
+        >>> 
         """
         super(mcp_new,self).__init__()
         self.c = c if c is not None else 'c'
@@ -370,7 +374,7 @@ class mcp_new(BiGraph):
             av_ind['avg_'+ind] = av_ind['s_'+side]*av_ind[ind]/av_ind['N_'+aside]
             self._nodes[aside] = merge(self._nodes[aside],av_ind[[aside,'avg_'+ind]].groupby(aside).sum().reset_index(),how='left',left_on=aside,right_on=aside)
 
-    def to_csv(self,side=None,th=None,path='',th2=None,report=False):
+    def to_csv(self,side=None,th=None,path='',th_low=None,report=False):
         '''Dumps one of the projections into two csv files (name_side_nodes.csv,name_side_edges.csv).
         
         Parameters
@@ -379,10 +383,12 @@ class mcp_new(BiGraph):
             Side to save the projection. If None it will save the bipartite network.
         th : float
             Threshold to populate the MST with.
-        th2 : float (optional)
+        th_low : float (optional)
             Lower threshold to the strength of the links.
         path : str
             Path to save the files to.
+        report : boolean (False)
+            If True it prints a small summary of the output network.
 
         Returns
         -------
@@ -394,21 +400,30 @@ class mcp_new(BiGraph):
         if (th is None)&(side is not None):
             raise NameError('Must provide a threshold')
         if side is None:
-            DataFrame(self.edges(),columns=[self.c,self.p]).to_csv(path+self.name+'_bipartite_edges.csv',index=False)
-            self.nodes(self.c,as_df=True).to_csv(path+self.name+'_'+side+'_nodes.csv')
+            edges = DataFrame(self.edges(),columns=[self.c,self.p])
+            edges.to_csv(path+self.name+'_bipartite_edges.csv',index=False)
+            nodes_c = self.nodes(self.c,as_df=True)
+            nodes_p = self.nodes(self.p,as_df=True)
+            nodes_c.to_csv(path+self.name+'_'+self.c+'_nodes.csv')
+            nodes_p.to_csv(path+self.name+'_'+self.p+'_nodes.csv')
+            if report:
+                print 'Bipartite network'
+                print 'Number of edges: ',len(edges)
+                print 'Number of nodes '+self.c+': ',len(nodes_c)
+                print 'Number of nodes '+self.p+': ',len(nodes_p)
         else:
             dis = DataFrame([(u,v,self.P[side].get_edge_data(u,v)['weight']) for u,v in self.P[side].edges()],columns=[side+'_x',side+'_y','fi'])
             dis = build_connected(dis,th,progress=False)
             dis['fi'] = dis['fi'].astype(float)
-            if th2 is None:
+            if th_low is None:
                 dis.to_csv(path+self.name+'_'+side+'_th'+str(th)+'_edges.csv')
             else:
-                dis = dis[dis['fi']>=th2]
-                dis.to_csv(path+self.name+'_'+side+'_th'+str(th)+'_th2'+str(th2)+'_edges.csv')
+                dis = dis[dis['fi']>=th_low]
+                dis.to_csv(path+self.name+'_'+side+'_th'+str(th)+'_th_low'+str(th_low)+'_edges.csv')
             nns = self.nodes(side,as_df=True)
             if report:
                 print 'Upper threshold: ',th
-                print 'Lower threshold: ',th2
+                print 'Lower threshold: ',th_low
                 print 'Nodes: ',len(nns)
                 print 'Edges: ',len(dis)
             nns.to_csv(path+self.name+'_'+side+'_nodes.csv')
