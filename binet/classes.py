@@ -226,7 +226,6 @@ class mcp_new(BiGraph):
             self.load_nodes_data(self.c,nodes_c)
         if nodes_p is not None:
             self.load_nodes_data(self.p,nodes_p)
-        self.P = {self.c:Graph(),self.p:Graph()}
 
     def _check_use(self,use,data):
         if (self.c in data.columns.values)&(use[0] != self.c):
