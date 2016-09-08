@@ -216,10 +216,9 @@ class mcp_new(BiGraph):
         --------
         >>> 
         """
-        super(mcp_new,self).__init__(side=c,aside=p)
         self.c = c if c is not None else 'c'
         self.p = p if p is not None else 'p'
-        self.side,self.aside  = self.c,self.p
+        super(mcp_new,self).__init__(side=self.c,aside=self.p)
         self.data = None
         self.load_links_data(data,use=use)
         self.name = name
