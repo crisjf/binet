@@ -107,7 +107,7 @@ def build_connected(dis_,th,s=None,t=None,w=None,directed=False,progress=True):
             print 'N nodes:',len(T.nodes())
         out = []
         for u,v in T.edges():
-            out.append((u,v,T.-get_edge_data(u, v)['weight']))
+            out.append((u,v,-T.get_edge_data(u, v)['weight']))
         edges = DataFrame(out,columns=[s,t,w])
         edges[s] = edges[s].astype(dis_.dtypes[s])
         edges[t] = edges[t].astype(dis_.dtypes[t])
