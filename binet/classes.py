@@ -370,7 +370,7 @@ class mcp_new(BiGraph):
             av_ind['avg_'+ind] = av_ind['s_'+side]*av_ind[ind]/av_ind['N_'+aside]
             self._nodes[aside] = merge(self._nodes[aside],av_ind[[aside,'avg_'+ind]].groupby(aside).sum().reset_index(),how='left',left_on=aside,right_on=aside)
 
-    def to_csv(self,side=None,th=None,path='',th2=None):
+    def to_csv(self,side=None,th=None,path='',th2=None,report=False):
         '''Dumps one of the projections into two csv files (name_side_nodes.csv,name_side_edges.csv).
         
         Parameters
@@ -403,8 +403,16 @@ class mcp_new(BiGraph):
             if th2 is None:
                 dis.to_csv(path+self.name+'_'+side+'_th'+str(th)+'_edges.csv')
             else:
-                dis[dis['fi']>=th2].to_csv(path+self.name+'_'+side+'_th'+str(th)+'_th2'+str(th2)+'_edges.csv')
-            self.nodes(side,as_df=True).to_csv(path+self.name+'_'+side+'_nodes.csv')
+                dis = dis[dis['fi']>=th2]
+                dis.to_csv(path+self.name+'_'+side+'_th'+str(th)+'_th2'+str(th2)+'_edges.csv')
+            nns = self.nodes(side,as_df=True)
+            if report:
+                print 'Upper threshold: ',th
+                print 'Lower threshold: ',th2
+                print 'Nodes: ',len(nns)
+                print 'Edges: ',len(dis)
+            nns.to_csv(path+self.name+'_'+side+'_nodes.csv')
+
 
 
 class mcp(object):
