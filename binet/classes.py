@@ -167,6 +167,7 @@ class BiGraph(Graph):
         dis['p_y'] = dis['n_both']/dis['n_y'].astype(float)
         dis['fi'] = dis[['p_x','p_y']].min(1)
         dis = dis[[side+'_x',side+'_y','fi']]
+        self.P[side] = Graph()
         self.P[side].add_weighted_edges_from([val[1:] for val in dis.itertuples()])
 
 
