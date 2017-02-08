@@ -6,6 +6,60 @@ from scipy.interpolate import interp1d
 from requests import get
 import io,urllib2,bz2
 
+def getJenksBreaks( dataList, numClass ):
+    dataList.sort()
+    mat1 = []
+    for i in range(0,len(dataList)+1):
+        temp = []
+        for j in range(0,numClass+1):
+            temp.append(0)
+        mat1.append(temp)
+    mat2 = []
+    for i in range(0,len(dataList)+1):
+        temp = []
+        for j in range(0,numClass+1):
+            temp.append(0)
+        mat2.append(temp)
+    for i in range(1,numClass+1):
+        mat1[1][i] = 1
+        mat2[1][i] = 0
+        for j in range(2,len(dataList)+1):
+            mat2[j][i] = float('inf')
+    v = 0.0
+    for l in range(2,len(dataList)+1):
+        s1 = 0.0
+        s2 = 0.0
+        w = 0.0
+        for m in range(1,l+1):
+            i3 = l - m + 1
+            val = float(dataList[i3-1])
+            s2 += val * val
+            s1 += val
+            w += 1
+            v = s2 - (s1 * s1) / w
+            i4 = i3 - 1
+            if i4 != 0:
+                for j in range(2,numClass+1):
+                    if mat2[l][j] >= (v + mat2[i4][j - 1]):
+                        mat1[l][j] = i3
+                        mat2[l][j] = v + mat2[i4][j - 1]
+        mat1[l][1] = 1
+        mat2[l][1] = v
+    k = len(dataList)
+    kclass = []
+    for i in range(0,numClass+1):
+        kclass.append(0)
+    kclass[numClass] = float(dataList[len(dataList) - 1])
+    countNum = numClass
+    while countNum >= 2:#print "rank = " + str(mat1[k][countNum])
+        id = int((mat1[k][countNum]) - 2)
+        #print "val = " + str(dataList[id])
+        kclass[countNum - 1] = dataList[id]
+        k = int((mat1[k][countNum] - 1))
+        countNum -= 1
+    return kclass
+    
+
 
 def CalculateComplexity(M,th=0.0001):
     '''Calculates the Economic Complexity Index following the method of reflections presented in
@@ -50,6 +104,25 @@ def CalculateComplexity(M,th=0.0001):
     ECI = (kc-mean(kc))/std(kc)
     PCI = (kp-mean(kp))/std(kp)
     return ECI.tolist(),PCI.tolist()
+
+from copy import deepcopy
+def order_nodes(dis,s=None,t=None):
+    """
+    Orders the nodes such that the source codes are always smaller than the target codes.
+    It is used to flatten a directed network.
+    """
+    s = dis.columns.values[0] if s is None else s
+    t = dis.columns.values[1] if t is None else t
+    new = deepcopy(dis)
+    B = (new[s]>new[t])
+    S,T = zip(*new[B][[s,t]].values)
+    new.loc[B,s] = T
+    new.loc[B,t] = S
+    if len(new.columns) >2:
+        new = new.groupby([s,t]).max().reset_index()
+    else:
+        new = new.drop_duplicates()
+    return new
 
 
 def build_connected(dis_,th,s=None,t=None,w=None,directed=False,progress=True):
@@ -113,39 +186,30 @@ def build_connected(dis_,th,s=None,t=None,w=None,directed=False,progress=True):
         edges[t] = edges[t].astype(dis_.dtypes[t])
         return edges
     else:
-        net = dis[dis[w]>=th]
+        new = order_nodes(dis,s=None,t=None)
         G = Graph()
-        G.add_edges_from(list(set([tuple(set(edge)) for edge in zip(net[s],net[t])])))
-        N_con = number_connected_components(G)
-        while N_con>1:
-            Gc = max(connected_component_subgraphs(G), key=len)
-            data_g = [merge(DataFrame(Gc.nodes(),columns=['node_id']),dis,how='inner',left_on='node_id',right_on=s),
-                  merge(DataFrame(Gc.nodes(),columns=['node_id']),dis,how='inner',left_on='node_id',right_on=t)]
-            data_g = concat(data_g).drop('node_id',1).drop_duplicates()
-            graphs = connected_component_subgraphs(G)
-            for g in graphs:
-                if len(g) != len(Gc):
-                    d_temp = []
-                    for v in g.nodes():
-                        d_temp.append(data_g[(data_g[s]==v)|(data_g[t]==v)])
-                    d_temp = concat(d_temp).drop_duplicates()
-                    if len(d_temp) == 0:
-                        print 'Not possible to connect nodes: ',g.nodes()
-                    net.loc[len(net)] = d_temp.sort('t',ascending=False).iloc[0].values
-                    break
-            G = Graph()
-            G.add_edges_from(list(set([tuple(set(edge)) for edge in zip(net[s],net[t])])))
-            N_con = number_connected_components(G)
-        if progress:
-            print 'N edges:',len(net)
-            print 'N nodes:',len(set(net[s].values)|set(net[t].values))
-        net[s] = net[s].astype(dis_.dtypes[s])
-        net[t] = net[t].astype(dis_.dtypes[t])
-        return net
+        G.add_edges_from(zip(new[s].values,new[t].values,[{'weight':-f} for f in new[w]]))
+        T = minimum_spanning_tree(G)
+        Tedges = concat([DataFrame(T.edges(),columns=[s,t]).reset_index(),DataFrame(T.edges(),columns=[t,s]).reset_index()])
+        Tedges = merge(Tedges,dis).dropna()
+        idx = Tedges.groupby(['index'])[w].transform(max) == Tedges[w]
+        edges_out = Tedges[idx][[s,t]]
+        edges_out = merge(concat([dis[dis[w]>=th][[s,t]],edges_out]).drop_duplicates(),dis)
+        edges_out[s] = edges_out[s].astype(dis_.dtypes[s])
+        edges_out[t] = edges_out[t].astype(dis_.dtypes[t])
+        return edges_out
     
 
 def calculateRCA(data_,c='',p='',x='',shares=False):
-    '''Returns the RCA'''
+    '''
+    Returns the RCA of the data expressed in data
+
+    Parameters
+    ----------
+    data_ : pandas.DataFrame
+        Raw data of count.
+
+    '''
     c = data_.columns.values[0] if c == '' else c
     p = data_.columns.values[1] if p == '' else p
     x = data_.columns.values[2] if x == '' else x

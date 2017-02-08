@@ -4,12 +4,33 @@ try:
 except:
     print 'Warning: No module named graph_tool found.'
 from pandas import DataFrame,merge
-#Note: I use a separate file because of conflicts between networkx and graph_tool
 
 def get_pos(net_,s=None,t=None,node_id = None,comms = False,progress=False,C=None):
     '''Returns the sfdp layout of the given network (https://graph-tool.skewed.de/static/doc/draw.html#graph_tool.draw.sfdp_layout).
     If comms is True it also returns a community id for each node.    
     WARNING: Requires graph_tool
+
+    Parameters
+    ----------
+    net_ : DataFrame
+        DataFrame with a list of edges.
+    s : str (optional)
+        Column label of the source node.
+        If not provided it will be set as the first column of net_.
+    t : str (optional)
+        Column label of the target node.
+        If not provided it will be set as the second column of net_.
+    node_id : str (optional)
+        Label to use for the node_id columns in the output.
+    comms : boolean (False)
+        If True it will detect communities as well.
+    progress : boolean (False)
+        If True it will print the progress. 
+        Used for debugging.
+    C : float (optional, default: 0.2)
+        Relative strength of repulsive forces.
+        See graph_tool.draw.sfdp_layout()
+    
     '''
     node_id = 'node_id' if node_id is None else node_id
     s = net_.columns.values[0] if s is None else s
@@ -36,4 +57,3 @@ def get_pos(net_,s=None,t=None,node_id = None,comms = False,progress=False,C=Non
         blocks = state.get_blocks()
         out = merge(out,merge(net_norm,DataFrame([(i,blocks[i]) for i in net_norm['index']],columns=['index','c'])).drop('index',1))
     return out
-    

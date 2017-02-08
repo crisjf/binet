@@ -1,5 +1,6 @@
 from pandas import DataFrame,merge
-from numpy import sqrt,mean,corrcoef
+from collections import defaultdict
+from numpy import sqrt,mean,corrcoef,log
 from networkx import Graph,set_node_attributes,set_edge_attributes
 from functions import calculateRCA,CalculateComplexity,build_connected,build_html
 from functions_gt import get_pos
@@ -8,6 +9,69 @@ import webbrowser
 from copy import deepcopy
 from itertools import chain 
 
+class gGraph(Graph):
+    def __init__(self,node_id=None):
+        '''
+        Wrapper for nx.Graph() class that integrates it with pandas.
+        I use it for the projections.
+        '''
+        self.node_id = 'node_id' if node_id is None else node_id
+        super(gGraph,self).__init__()
+
+    def __str__(self):
+        out = ''
+        out+= 'Nodes: '+self.node_id + ' (' + str(len(self.nodes())) + ')'
+        return out.encode('utf-8')
+
+    def edges(self,as_df=False,data=False):
+        edges = []
+        if data&(not as_df):
+            return super(gGraph,self).edges(nbunch=None, data=True, default=None)
+        elif as_df:
+            props = set([])
+            edges = super(gGraph,self).edges(nbunch=None, data=True, default=None)
+            for u,v,d in edges:
+                props=props|set(d.keys())
+            props = list(props)
+            es = []
+            for u,v,d in edges:
+                d = defaultdict(lambda:'NA',d)
+                es.append([u,v]+[d[p] for p in props])
+            return DataFrame(es,columns=[str(self.node_id)+'_x',str(self.node_id)+'_y']+props)
+        else:
+            return super(gGraph,self).edges(nbunch=None, data=False, default=None)            
+
+    def nodes(self,as_df=False,data=False):
+        '''
+        Returns a list of nodes.
+        If ad_df is set to True it will return the nodes properties as well.
+
+        Parameters
+        ----------
+        as_df : boolean (False)
+            If True it will return the nodes as a DataFrame.
+        
+        Returns
+        -------
+        nodes : list or pandas.DataFrame
+            List of nodes or DataFrame with nodes and properties.
+        '''
+        if not as_df:
+            return super(gGraph,self).nodes(data=data)
+        else:
+            nns = super(gGraph,self).nodes(data=True)
+            properties = list(set(chain.from_iterable([d.keys() for u,d in nns])))
+            out = []
+            for u,d in nns:
+                oout = [u]
+                for prop in properties:
+                    try:
+                        oout+=[d[prop]]
+                    except:
+                        oout+=['NA']
+                out.append(oout)
+
+            return DataFrame(out,columns=[self.node_id]+properties)
 
 
 class BiGraph(Graph):
@@ -25,6 +89,7 @@ class BiGraph(Graph):
         self.side  = side
         self.aside = aside
         self.P = {side:None,aside:None}
+        self._ptype = 'CP'
     
     def add_nodes_from(self,nodes,side):
         if not hasattr(nodes[0], '__iter__'):
@@ -49,7 +114,22 @@ class BiGraph(Graph):
         super(BiGraph,self).add_edges_from(edges)
     
     def nodes(self,side,as_df=False):
-        '''Will only return the properties when data is asked as a dataframe.'''
+        '''
+        Returns a list of nodes.
+        If ad_df is set to True it will return the nodes properties as well.
+
+        Parameters
+        ----------
+        side : int or str
+            Tags for each side of the bipartite network.
+        as_df : boolean (False)
+            If True it will return the nodes as a DataFrame.
+        
+        Returns
+        -------
+        nodes : list or pandas.DataFrame
+            List of nodes or DataFrame with nodes and properties.
+        '''
         self._check_side(side)
         if not as_df:
             return [u for u in self.nodes_iter() if self.node[u]['side'] == side]
@@ -70,11 +150,35 @@ class BiGraph(Graph):
             return DataFrame(out,columns=[side]+properties)
 
     def edges(self,nbunch=None, data=False, default=None,as_df=False):
-        if not as_df:
-            return super(BiGraph,self).edges(nbunch=None, data=False, default=None)
+        '''
+        Nodes go from side to aside.
+        '''
+        nodes_side = set(self.nodes(self.side))
+        edges = []
+        if as_df|data:
+            props = set([])
+            for u,v,d in super(BiGraph,self).edges(nbunch=None, data=True, default=None):
+                if u in nodes_side:
+                    edges.append((u,v,d))
+                else:
+                    edges.append((v,u,d))
+                props=props|set(d.keys())
         else:
-            es = list(super(BiGraph,self).edges(nbunch=None, data=False, default=None))
-            return DataFrame(es,columns=[self.side,self.aside])
+            for u,v in super(BiGraph,self).edges(nbunch=None, data=False, default=None):
+                if u in nodes_side:
+                    edges.append((u,v))
+                else:
+                    edges.append((v,u))
+        if not as_df:
+            return edges
+        else:
+            props = list(props)
+            es = []
+            for u,v,d in edges:
+                d = defaultdict(lambda:'NA',d)
+                es.append([u,v]+[d[p] for p in props])
+            return DataFrame(es,columns=[self.side,self.aside]+props)
+
 
     def degree(self,side,nbunch=None, weight=None,as_df=False):
         '''
@@ -144,7 +248,7 @@ class BiGraph(Graph):
         """
         set_edge_attributes(self,name,values)
 
-    def project(self,side):
+    def _project_CP(self,side):
         """
         Builds the projection of the bipartite network on to the chosen side.
         The projection is done using conditional probability.
@@ -167,11 +271,48 @@ class BiGraph(Graph):
         dis['p_y'] = dis['n_both']/dis['n_y'].astype(float)
         dis['fi'] = dis[['p_x','p_y']].min(1)
         dis = dis[[side+'_x',side+'_y','fi']]
-        self.P[side] = Graph()
+        self.P[side] = gGraph(node_id=side)
         self.P[side].add_weighted_edges_from([val[1:] for val in dis.itertuples()])
+        nodes = merge(self.P[side].nodes(as_df=True),self.nodes(side,as_df=True),how='left')
+        properties = nodes.columns.values.tolist()
+        properties.remove(side)
+        for prop in properties:
+            values = dict(zip(nodes[side].values,nodes[prop].values))
+            set_node_attributes(self.P[side],prop,values)
 
+    def _project_AA(self,side):
+        """
+        Builds the projection of the bipartite network on to the chosen side.
+        The projection is done using the ADAMIC-ADAR index.
 
-    def projection(self,side):
+        Parameters
+        ----------
+        side : int or str
+            Tags for each side of the bipartite network.
+        """
+        self._check_side(side)
+        aside = self.side if side == self.aside else self.aside
+        net = self.edges(as_df=True)[[side,aside]]
+        AA = merge(net,net,how='inner',left_on=aside,right_on=aside)
+        nodes = self.nodes(side,as_df=True)[[side]].reset_index().rename(columns={'index':side+'_index'})
+
+        AA = merge(AA,nodes.rename(columns={side:side+'_x',side+'_index':side+'_index_x'}),how='left',right_on=side+'_x',left_on=side+'_x')
+        AA = merge(AA,nodes.rename(columns={side:side+'_y',side+'_index':side+'_index_y'}),how='left',right_on=side+'_y',left_on=side+'_y')
+        AA = AA[AA[side+'_index_x']>AA[side+'_index_y']].drop([side+'_index_x',side+'_index_y'],1)
+        AA = merge(AA,self.degree(aside,as_df=True))
+        AA['AA'] = 1./log(AA['degree'])
+        AA = AA[[side+'_x',side+'_y','AA']].groupby([side+'_x',side+'_y']).sum().reset_index()
+
+        self.P[side] = gGraph(node_id=side)
+        self.P[side].add_weighted_edges_from([val[1:] for val in AA.itertuples()])
+        nodes = merge(self.P[side].nodes(as_df=True),self.nodes(side,as_df=True),how='left')
+        properties = nodes.columns.values.tolist()
+        properties.remove(side)
+        for prop in properties:
+            values = dict(zip(nodes[side].values,nodes[prop].values))
+            set_node_attributes(self.P[side],prop,values)
+        
+    def projection(self,side,as_df=False,ptype=None):
         """
         Returns the network projection (will calculate if it does not exist).
 
@@ -179,15 +320,140 @@ class BiGraph(Graph):
         ----------
         side : int or str
             Tags for each side of the bipartite network.
+        as_df : boolean (False)
+            If True it returns the projection as a DataFrame
+        ptype : str ('CP')
+            Similarity index used to calculate the projection.
+            Choose between conditional probability ('CP') and adamic-adamar ('AA').
 
         Returns
         ----------
         P : networkx.Graph() object
             Weighted betwork containing the projected network.
         """
-        if self.P[side] is None:
-            self.project(side)
-        return self.P[side]
+        ptype = self._ptype if ptype is None else ptype
+        if (ptype != self._ptype)|(self.P[side] is None):
+            self._ptype = ptype
+            if self._ptype == 'CP':
+                self._project_CP(side)
+            elif self._ptype == 'AA':
+                self._project_AA(side)
+            else:
+                raise NameError("Unrecognized projection type.")
+
+        if as_df:
+            P = self.P[side]
+            return DataFrame([(u,v,P.get_edge_data(u,v)['weight']) for u,v in P.edges()],columns=[side+'_x',side+'_y','weight'])
+        else:
+            return self.P[side]
+
+    def _best_th(self,side):
+        P = self.projection(side)
+        W = [P.get_edge_data(u,v)['weight'] for u,v in P.edges()]
+        N_edges = int(len(P.nodes())*3.3)
+        th = min(sorted(W,reverse=True)[:N_edges])
+        return th
+
+    def trim_projection(self,side,th=None):
+        if th is None:
+            th = self._best_th(side)
+        self._check_side(side)
+
+        P = build_connected(self.projection(side,as_df=True),th,progress=False)
+        return P
+
+    def _get_projection_pos(self,side,P,C=None):
+        '''This function requires graph_tool'''
+        pos = get_pos(P[[side+'_x',side+'_y']],node_id=side,comms=True,progress=False,C=C)
+        X = {}
+        Y = {}
+        Cc = {}
+        for i,x,y,c in pos.values:
+            X[i]=x
+            Y[i]=y
+            Cc[i]=c
+        self.set_node_attributes(side,'x',X)
+        self.set_node_attributes(side,'y',Y)
+        self.set_node_attributes(side,'c',Cc)
+        return pos
+
+    def draw_projection(self,side,th=None,C=None,path='',show=True,color=True,color_name=None,jenks=None):
+        '''
+        Draws the projection using d3plus.
+        
+        Parameters
+        ----------
+        side : int or str
+            Tag for the projectino of the bipartite network to draw.
+        th : float (optional)
+            If not provided, it will use a threshold such that the average degree is between 3 and 4.
+        show : boolean (True)
+            If True it will open a web tab to display the network.
+        color_name : str
+            Name of column to use for coloring.
+        jenks : int (optional)
+            If provided, it will apply Jenks natural breaks on the color column.
+
+
+        path must be the absolut path, including the "/" symbol at the end. 
+        This function requires graph_tool
+        ptype='CP'
+        
+        '''
+
+        max_colors=25
+        if th is None:
+            th = self._best_th(side)
+        color_name = 'c' if color_name is None else color_name
+
+        P = self.trim_projection(side,th=th)
+        cs = P[[side+'_x',side+'_y']]
+        self._get_projection_pos(side,P,C=C)
+
+        path = 'file://'+getcwd()+'/' if path == '' else path+'/'
+
+        props = [val for val in self.nodes(side,as_df=True).columns.values.tolist() if val not in set([side,'x','y'])]
+
+        nodes = self.nodes(side,as_df=True)
+        nodes = merge(nodes,DataFrame(self.projection(side).nodes(),columns=[side]),how='right')
+        if color:
+            html = build_html(nodes,cs,node_id=side,source_id=side+'_x',target_id=side+'_y',color=color_name,props=props,progress=False,max_colors=max_colors)
+        else:
+            html = build_html(nodes,cs,node_id=side,source_id=side+'_x',target_id=side+'_y',props=props,progress=False)
+        out = side+'_'+self.name+'_th'+str(th)+'_ptype'+self._ptype+'.html' 
+        open(out,mode='w').write(html.encode('utf-8'))
+        if show:
+            webbrowser.open(path+out)
+            print 'OUT: ',path+out
+
+
+    def densities(self,side,m,progress=True):
+        '''m must be another object of type mcp
+        NOT WORKING YET
+        '''
+        self._check_side(side)
+        if self.size[side] is None:
+            self._get_size(side)
+        F = self.size[side]
+        aside = self.c if side == self.p else self.p
+        g = self.projection(side,as_network=True)
+
+        if progress:
+            print 'Calculating densities based on ' + side +' space'
+
+        W = []
+        for c in self.G.nodes(aside):
+            f = {}
+            ps = set(m.G.neighbors(c))
+            for u in g.nodes():
+                w = 0.
+                for v in ps:
+                    ww = g.get_edge_data(u,v)
+                    if ww is not None:
+                        w += ww['weight']
+                f[u] = w
+            W += [(c,u,f[u]/F[u],(u in ps)) for u in g.nodes()]
+        return DataFrame(W,columns=[aside,side,'w','mcp'])
 
 
 
@@ -215,6 +481,8 @@ class mcp_new(BiGraph):
         Examples
         --------
         >>> 
+
+        NOTE: BiGraph is Undirected!!! This is a BIG problem!!
         """
         self.c = c if c is not None else 'c'
         self.p = p if p is not None else 'p'
@@ -226,6 +494,22 @@ class mcp_new(BiGraph):
             self.load_nodes_data(self.c,nodes_c)
         if nodes_p is not None:
             self.load_nodes_data(self.p,nodes_p)
+        if self.data is not None:
+            self.build_net()
+
+    def __str__(self):
+        out = ''
+        out+= 'Name        : '+self.name +'\n' if self.name != '' else ''
+        out+= 'Nodes labels: '+self.c + ' | ' + self.p + ' (' + str(len(self.nodes(self.c))) + 'x' + str(len(self.nodes(self.p))) +')\n'
+        out+= 'Ptype       : '+self._ptype +'\n'
+        if (self.P[self.side] is not None)|(self.P[self.aside] is not None):
+            out+= 'Projections:\n'
+            if (self.P[self.side] is not None):
+                out+='   '+str(self.P[self.side].node_id)+' ('+str(len(self.P[self.side].nodes()))+')\n'
+            if (self.P[self.aside] is not None):
+                out+='   '+str(self.P[self.aside].node_id)+' ('+str(len(self.P[self.aside].nodes()))+')\n'
+        out = out[:-1]
+        return out.encode('utf-8')
 
     def _check_use(self,use,data):
         if (self.c in data.columns.values)&(use[0] != self.c):
@@ -286,7 +570,7 @@ class mcp_new(BiGraph):
     def _calculate_RCA(self):
         self.data = merge(self.data,calculateRCA(self.data,c=self.c,p=self.p,x='x',shares=True).drop('x',1),how='left',left_on=[self.c,self.p],right_on=[self.c,self.p])
 
-    def build_net(self,RCA=True,th=1.):
+    def build_net(self,RCA=True,th=1.,xth=0.):
         '''
         Builds the bipartite network with the given data.
         Warning: If RCA is False then th should be provided.
@@ -298,12 +582,12 @@ class mcp_new(BiGraph):
         th       : float (default=1)
             Threshold to use. If RCA=True is the RCA threshold, if RCA=False is the flow threshold.
         '''
-        self.remove_nodes_from(self.edges())
+        self.remove_edges_from(self.edges())
         header = '' if self.name == '' else self.name + ': '
         if 'RCA' not in self.data.columns.values:
             self._calculate_RCA()
         if RCA:
-            net = self.data[self.data['RCA']>=th][[self.c,self.p,'RCA','x']]
+            net = self.data[(self.data['RCA']>=th)&(self.data['x']>=xth)][[self.c,self.p,'RCA','x']]
         else:
             print 'Warning: th should be provided.'
             net = self.data[self.data['x']>=th][[self.c,self.p,'RCA','x']]
@@ -311,7 +595,6 @@ class mcp_new(BiGraph):
         self.set_edge_attributes('RCA',dict(zip(zip(net[self.c].values,net[self.p].values),net['RCA'].values)))
         self.set_edge_attributes('x',dict(zip(zip(net[self.c].values,net[self.p].values),net['x'].values)))
 
-        
 
     def filter_nodes(self,side,node_list,keep=True):
         '''
@@ -426,6 +709,25 @@ class mcp_new(BiGraph):
                 print 'Nodes: ',len(nns)
                 print 'Edges: ',len(dis)
             nns.to_csv(path+self.name+'_'+side+'_nodes.csv')
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -569,7 +871,7 @@ class mcp(object):
             self._nodes[aside] = merge(self._nodes[aside],av_ind[[aside,'avg_'+ind]].groupby(aside).sum().reset_index(),how='left',left_on=aside,right_on=aside)
 
 
-    def project(self,side):
+    def _project(self,side):
         """Builds the projection of the bipartite network on to the chosen side."""
         self._check_side(side)
         if self.net is None:
@@ -607,7 +909,7 @@ class mcp(object):
             if self.projection_d[side] is None:
                 if progress:
                     print self.name +': ' + 'Calculating projection on '+str(side)
-                self.project(side)
+                self._project(side)
             if as_network:
                 P = self.projection_d[side][[side+'_x',side+'_y','fi']]
                 g = Graph()
@@ -746,15 +1048,62 @@ class mcp(object):
 
 
 
-class tnet(object):
-    def __init__(self,data,u='',v='',n='',single_ocurrencies=False,directed=False):
+
+
+
+
+
+
+
+
+
+
+
+
+class tnet(Graph):
+    def __init__(self,data,use=None,single_ocurrencies=False,directed=False):
         """
         Class of networks based on the number of ocurrencies of a pair (u,v). 
         Examples are: language network, city mobility network, and labor mobility network.
+
+        Parameters
+        ----------
         """
         if directed:
             raise NameError('Directed type is not supported yet')
-        self.load_links_data(data,u=u,v=v,n=n,single_ocurrencies=single_ocurrencies,directed=directed)
+        self.data = None
+
+
+        self.load_links_data(data,use=use,directed=directed)
+
+
+    def load_links_data(self,data,use=None,directed=False):
+        """
+        Loads the data into the class. 
+
+        Parameters
+        ----------
+        data : list or DataFrame
+            Data on which to build the network.
+            If data is a list, it should have the form [(c,p,x),...].
+        use  : list
+            List of columns to use as nodes ids and weight.
+            use has the form [c,p,x].
+            If use is not provided, then it will use the first three columns of the DataFrame in the order c,p,x.
+        """
+
+        if type(data) != type(DataFrame()):
+            data = DataFrame(data)
+            use = data.columns.values.tolist()[:3]
+        use = data.columns.values[:3].tolist() if use is None else use
+        self._check_use(use,data)
+        newdata = data[use].rename(columns=dict(zip(use,['s','t','x'])))
+        if self.data is not None:
+            newdata = concat([self.data,newdata])
+        newdata = newdata.groupby(['s','t']).sum().reset_index()
+        self.data = newdata
+        self.add_nodes_from(self.data[self.c].values.tolist(),self.c)
+        self.add_nodes_from(self.data[self.p].values.tolist(),self.p)
 
     def load_links_data(self,data,u='',v='',n='',single_ocurrencies=False,directed=False):
         """Loads the data into the class.
@@ -812,6 +1161,26 @@ class tnet(object):
 
     def t(self):
         return self.data[[self.u,self.v,'t']]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
