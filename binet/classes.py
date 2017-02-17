@@ -457,7 +457,7 @@ class BiGraph(Graph):
 
 
 
-class mcp_new(BiGraph):
+class mcp(BiGraph):
     def __init__(self,c=None,p=None,name='',data=None,use=None,nodes_c=None,nodes_p=None):
         """
         Base class for undirected bipartite graphs.
