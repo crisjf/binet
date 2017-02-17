@@ -731,7 +731,7 @@ class mcp_new(BiGraph):
 
 
 
-class mcp(object):
+class mcp_old(object):
     def __init__(self,data,name='',nodes_c=None,nodes_p=None,c='',p='',x=''):
         """
         data can be a dataframe with three columns, or a list of tuples
@@ -1047,24 +1047,12 @@ class mcp(object):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 class tnet(Graph):
     def __init__(self,data,use=None,single_ocurrencies=False,directed=False):
         """
         Class of networks based on the number of ocurrencies of a pair (u,v). 
         Examples are: language network, city mobility network, and labor mobility network.
+        Flow network
 
         Parameters
         ----------
