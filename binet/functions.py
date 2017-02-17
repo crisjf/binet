@@ -1,10 +1,9 @@
 from networkx import Graph,minimum_spanning_tree,number_connected_components,is_connected,connected_component_subgraphs
-import json
 from pandas import DataFrame,merge,concat,read_csv
 from numpy import array,matrix,mean,std,log
 from scipy.interpolate import interp1d
-from requests import get
-import io,urllib2,bz2
+from copy import deepcopy
+import json
 
 def getJenksBreaks( dataList, numClass ):
     dataList.sort()
@@ -105,37 +104,81 @@ def CalculateComplexity(M,th=0.0001):
     PCI = (kp-mean(kp))/std(kp)
     return ECI.tolist(),PCI.tolist()
 
-from copy import deepcopy
-def order_nodes(dis,s=None,t=None):
+
+def order_columns(net,s=None,t=None):
+    '''
+    Makes sure that the label for the source node is larger than the label for the target node.
+    It flips the nodes if t>s.
+
+    Parameters
+    ----------
+    net : pandas.DataFrame
+        List of links
+    s,t : str (optional)
+        Label of the column for source and target nodes.
+
+    Returns
+    -------
+    net : pandas.DataFrame
+        List of links.
+    '''
+    s = net.columns.values[0] if s is None else s
+    t = net.columns.values[1] if t is None else t
+    B = net[s]>net[t]
+    if B.sum() !=0:
+        S,T = zip(*net[B][[s,t]].values)
+        net.loc[B,s]=T
+        net.loc[B,t]=S
+    return net
+
+
+
+def flatten(dis,s=None,t=None,agg_method='sum'):
     """
-    Orders the nodes such that the source codes are always smaller than the target codes.
-    It is used to flatten a directed network.
+    Orders the nodes such that the source codes are always smaller than the target codes, and aggregates.
+    It is used to flatten a directed network in a table.
+
+    Parameters
+    ----------
+    dis : pandas.DataFrame
+        Table with source,target plus other columns that will be aggregated
+    s,t : str (optional)
+        Labels on dis to use as source and target
+    agg_method : str (default='sum')
+        Aggregation method
+        Can be 'sum' or 'max'
+
+    Returns
+    -------
+    new : pandas.DataFrame
+
     """
     s = dis.columns.values[0] if s is None else s
     t = dis.columns.values[1] if t is None else t
-    new = deepcopy(dis)
-    B = (new[s]>new[t])
-    S,T = zip(*new[B][[s,t]].values)
-    new.loc[B,s] = T
-    new.loc[B,t] = S
+    new = order_columns(deepcopy(dis),s=s,t=t)
     if len(new.columns) >2:
-        new = new.groupby([s,t]).max().reset_index()
+        if agg_method=='sum':
+            new = new.groupby([s,t]).sum().reset_index()
+        elif agg_method=='max':
+            new = new.groupby([s,t]).max().reset_index()
+        else:
+            raise NameError('Unrecognized aggregation method '+agg_method)
     else:
         new = new.drop_duplicates()
     return new
 
 
-def build_connected(dis_,th,s=None,t=None,w=None,directed=False,progress=True):
+def build_connected(net,th,s=None,t=None,w=None,directed=False,progress=True):
     """Builds a connected network out of a set of weighted edges and a threshold.
 
     Parameters
     ----------
-    dis : pandas DataFrame
+    net : pandas DataFrame
             Contains at least three columns: source, target, and weight
     th : float
             Threshold to use for the network.
     s,t,w : (optional) strings
-            Names of the columns in dis to use as source, target, and weight, respectively.
+            Names of the columns in net to use as source, target, and weight, respectively.
             If it is not provided, the first three columns as assumed to be s,t,and w, respectively.
     directed : False (default)
             Wether to consider the network as directed or as undirected.
@@ -156,12 +199,13 @@ def build_connected(dis_,th,s=None,t=None,w=None,directed=False,progress=True):
     Notes
     -----
     Set the threshold low to begin with.
+    The best threshold is such that the average degree of the network is close to 3.
     """
-    s = dis_.columns.values[0] if s is None else s
-    t = dis_.columns.values[1] if t is None else t
-    w = dis_.columns.values[2] if w is None else w
+    s = net.columns.values[0] if s is None else s
+    t = net.columns.values[1] if t is None else t
+    w = net.columns.values[2] if w is None else w
 
-    dis = dis_[[s,t,w]]
+    dis = net[[s,t,w]]
     dis[s] = dis[s].astype(int).astype(str)
     dis[t] = dis[t].astype(int).astype(str)
 
@@ -182,8 +226,8 @@ def build_connected(dis_,th,s=None,t=None,w=None,directed=False,progress=True):
         for u,v in T.edges():
             out.append((u,v,-T.get_edge_data(u, v)['weight']))
         edges = DataFrame(out,columns=[s,t,w])
-        edges[s] = edges[s].astype(dis_.dtypes[s])
-        edges[t] = edges[t].astype(dis_.dtypes[t])
+        edges[s] = edges[s].astype(net.dtypes[s])
+        edges[t] = edges[t].astype(net.dtypes[t])
         return edges
     else:
         new = order_nodes(dis,s=None,t=None)
@@ -195,36 +239,47 @@ def build_connected(dis_,th,s=None,t=None,w=None,directed=False,progress=True):
         idx = Tedges.groupby(['index'])[w].transform(max) == Tedges[w]
         edges_out = Tedges[idx][[s,t]]
         edges_out = merge(concat([dis[dis[w]>=th][[s,t]],edges_out]).drop_duplicates(),dis)
-        edges_out[s] = edges_out[s].astype(dis_.dtypes[s])
-        edges_out[t] = edges_out[t].astype(dis_.dtypes[t])
+        edges_out[s] = edges_out[s].astype(net.dtypes[s])
+        edges_out[t] = edges_out[t].astype(net.dtypes[t])
         return edges_out
     
 
-def calculateRCA(data_,c='',p='',x='',shares=False):
+def calculateRCA(data,c='',p='',x='',shares=False):
     '''
-    Returns the RCA of the data expressed in data
+    Returns the RCA expressed in data
 
     Parameters
     ----------
-    data_ : pandas.DataFrame
-        Raw data of count.
+    data : pandas.DataFrame
+        Raw data. It has source,target,volume (trade, number of people etc.).
+    c,p,x : str (optional)
+        Labels of the columns in data used for source,target,volume
+    shares : boolean (False)
+        If True it will also return the shares used to calculate the RCA
 
+    Returns
+    -------
+    RCA : pandas.DataFrame
+        Table with the RCAs, with the columns c,p,x,RCA
+        If shares is True it also includes:
+            s_c : Share of X_cp over X_c
+            s_p : Share of X_cp over X_p
     '''
-    c = data_.columns.values[0] if c == '' else c
-    p = data_.columns.values[1] if p == '' else p
-    x = data_.columns.values[2] if x == '' else x
-    data = data_[[c,p,x]]
-    data = merge(data,data.groupby(c).sum()[[x]].rename(columns={x:x+'_'+c}).reset_index()
+    c = data.columns.values[0] if c == '' else c
+    p = data.columns.values[1] if p == '' else p
+    x = data.columns.values[2] if x == '' else x
+    data_ = data[[c,p,x]]
+    data_ = merge(data_,data_.groupby(c).sum()[[x]].rename(columns={x:x+'_'+c}).reset_index()
                          ,how='inner',left_on=c,right_on=c)
-    data = merge(data,data.groupby(p).sum()[[x]].rename(columns={x:x+'_'+p}).reset_index()
+    data_ = merge(data_,data_.groupby(p).sum()[[x]].rename(columns={x:x+'_'+p}).reset_index()
                          ,how='inner',left_on=p,right_on=p)
-    X = float(data.sum()[x])
-    data['RCA'] = (data[x].astype(float)/data[x+'_'+p].astype(float))/(data[x+'_'+c].astype(float)/X)
+    X = float(data_.sum()[x])
+    data_['RCA'] = (data_[x].astype(float)/data_[x+'_'+p].astype(float))/(data_[x+'_'+c].astype(float)/X)
     if shares:
-        data['s_'+c] = (data[x].astype(float)/data[x+'_'+c].astype(float)) #Share of X_cp over X_c
-        data['s_'+p] = (data[x].astype(float)/data[x+'_'+p].astype(float)) #Share of X_cp over X_p
-        return data[[c,p,x,'RCA','s_'+c,'s_'+p]]   
-    return data[[c,p,x,'RCA']]
+        data_['s_'+c] = (data_[x].astype(float)/data_[x+'_'+c].astype(float)) 
+        data_['s_'+p] = (data_[x].astype(float)/data_[x+'_'+p].astype(float))
+        return data_[[c,p,x,'RCA','s_'+c,'s_'+p]]
+    return data_[[c,p,x,'RCA']]
 
 
 def read_cyto(cyto_file,node_id='shared_name'):
@@ -235,6 +290,7 @@ def read_cyto(cyto_file,node_id='shared_name'):
     for node in cyto['elements']['nodes']:
         out.append( (node['data']['shared_name'],node['position']['x'],node['position']['y']))
     return DataFrame(out,columns=[node_id,'x','y'])
+
 
 def df_interp(df,by=None,x=None,y=None,kind='linear'):
     '''Groups df by the given column, and interpolates the missing values.
@@ -255,85 +311,13 @@ def df_interp(df,by=None,x=None,y=None,kind='linear'):
     return DataFrame(interp,columns=[by,x,y])
 
 
-def WDI_get(var_name,start_year=None,end_year=None):
-    """Retrieves the given development indicator from the World Bank website.
-    http://data.worldbank.org/data-catalog/world-development-indicators
-    """
-    start_year = 1995 if start_year is None else start_year
-    end_year   = 2008 if end_year is None else end_year
-    if end_year<start_year:
-        raise NameError('start_year must come before end_year')
-    WDI_base = 'http://api.worldbank.org/countries/all/indicators/'
-    codes_url = 'https://commondatastorage.googleapis.com/ckannet-storage/2011-11-25T132653/iso_3166_2_countries.csv'
-    
-    WDI_api  = WDI_base+var_name+'?date='+str(start_year)+':'+str(end_year)+'&format=json'
-    ccodes = read_csv(codes_url)[['ISO 3166-1 2 Letter Code','ISO 3166-1 3 Letter Code']].rename(columns={'ISO 3166-1 2 Letter Code':'ccode2','ISO 3166-1 3 Letter Code':'ccode'})
-    r = get(WDI_api).json()
-    pages = r[0]['pages']
-    ind_name = r[1][0]['indicator']['value']
-    print 'Getting "'+ind_name+'" between '+str(start_year)+' and '+str(end_year)
-    data = [(entry['date'], entry['country']['id'],entry['value']) for entry in r[1]]
-    for page in range(2,pages+1):
-        r = get(WDI_api+'&page='+str(page)).json()
-        data += [(entry['date'], entry['country']['id'],entry['value']) for entry in r[1]]
-    data = merge(ccodes,DataFrame(data,columns=['year','ccode2',ind_name]),how='left')[['ccode','year',ind_name]].dropna()
-    data['ccode'] = data['ccode'].str.lower()
-    data['year']  = data['year'].astype(int)
-    try:
-        data[ind_name] = data[ind_name].astype(float)
-    except:
-        pass
-    return data
-
-def trade_data(classification='sitc'):
-    '''Downloads the world trade data from atlas.media.mit.edu
-
-    Example
-    ----------
-    >>> world_trade,pnames,cnames = bnt.trade_data('hs96')
-    '''
-    if classification not in ['sitc','hs92','hs96','hs02','hs07']:
-        raise NameError('Invalid classification')
-    print 'Retrieving trade data for '+classification
-    atlas_url = 'http://atlas.media.mit.edu/static/db/raw/'
-    trade_file = {'sitc':'year_origin_sitc_rev2.tsv.bz2',
-                  'hs92':'year_origin_hs92_4.tsv.bz2',
-                  'hs96':'year_origin_hs96_4.tsv.bz2',
-                  'hs02':'year_origin_hs02_4.tsv.bz2',
-                  'hs07':'year_origin_hs07_4.tsv.bz2'}
-    pname_file = {'sitc':'products_sitc_rev2.tsv.bz2',
-                  'hs92':'products_hs_92.tsv.bz2',
-                  'hs96':'products_hs_96.tsv.bz2',
-                  'hs02':'products_hs_02.tsv.bz2',
-                  'hs07':'products_hs_07.tsv.bz2'}
-
-    print 'Downloading country names from '+atlas_url+'country_names.tsv.bz2'
-    data = bz2.decompress(urllib2.urlopen(atlas_url+'country_names.tsv.bz2').read())
-    cnames = read_csv(io.BytesIO(data),delimiter='\t')[['id_3char','name']].rename(columns={'id_3char':'ccode'}).dropna()
-    
-    print 'Downloading product names from '+atlas_url + pname_file[classification]
-    data = bz2.decompress(urllib2.urlopen(atlas_url + pname_file[classification]).read())
-    pnames = read_csv(io.BytesIO(data),delimiter='\t')
-    pnames[classification] = pnames[classification].astype(str)
-    if classification[:2] == 'hs':
-        pnames['id_len'] = pnames[classification].str.len()
-        pnames = pnames[pnames['id_len']<=4]
-    pnames = pnames[[classification,'name']].rename(columns={classification:'pcode'}).dropna()
-    pnames['pcode'] = pnames['pcode'].astype(int)
-    pnames = pnames.sort_values(by='pcode')
-    
-    print 'Downloading trade   data  from '+atlas_url +trade_file[classification]
-    data = bz2.decompress(urllib2.urlopen(atlas_url +trade_file[classification]).read())
-    world_trade = read_csv(io.BytesIO(data),delimiter='\t')[['year','origin',classification,'export_val']].rename(columns={'origin':'ccode',classification:'pcode','export_val':'x'}).dropna()
-    world_trade['year'] = world_trade['year'].astype(int)
-    world_trade['pcode'] = world_trade['pcode'].astype(int)
-    return world_trade,pnames,cnames
 
 
 
 def build_html(nodes,edges,node_id =None,source_id =None,target_id=None,size_id=None,weight_id = None,x=None,y=None,color=None,props = None,progress=True,max_colors=15):
-    """Creates an html file with a d3plus visualization of the network from the dataframes nodes and edges.
-        NEEDS A FUNCTION TO HANDLE WITH MANY DIFFERENT COLORS
+    """
+    Creates an html file with a d3plus visualization of the network from the dataframes nodes and edges.
+    NEEDS A FUNCTION TO HANDLE WITH MANY DIFFERENT COLORS
     """
 
     node_id = nodes.columns.values[0] if node_id is None else node_id
@@ -422,5 +406,116 @@ def build_html(nodes,edges,node_id =None,source_id =None,target_id=None,size_id=
     return html
 
 
+def compare_nets(M1_,M2_):
+    '''
+    Given two BiGraph objects it compares them on different dimensions.
+    (NEEDS TO BE TESTED)
+    '''
+    n1 = 'Unnamed' if M1_.name == '' else M1_.name
+    n2 = 'Unnamed' if M2_.name == '' else M2_.name
 
+    M1 = deepcopy(M1_)
+    M2 = deepcopy(M2_)
+    if M1.net is None:
+        M1.build_net(progress=False)
+    if M2.net is None:
+        M2.build_net(progress=False)
+    edges1 = M1.net[[M1.c,M1.p]]
+    edges2 = M2.net[[M2.c,M2.p]]
 
+    nodes1 = set(M1.nodes(M1.c)[M1.c].values)
+    nodes2 = set(M2.nodes(M2.c)[M2.c].values)
+    c_total_nodes     = len(nodes1|nodes2)
+    c_repeated_nodes  = len(nodes1.intersection(nodes2))
+    c_f_missing_nodes = 1.-len(nodes1.intersection(nodes2))/float(len(nodes1|nodes2))
+    c_f_missing_1     = 1.-len(nodes1)/float(len(nodes1|nodes2))
+    c_f_missing_2     = 1.-len(nodes2)/float(len(nodes1|nodes2))
+
+    nodes_c = list(nodes1.intersection(nodes2))
+    nodes = DataFrame(nodes_c,columns=['node_id'])
+    edges1 = merge(edges1,nodes,how='right',left_on=M1.c,right_on='node_id').drop('node_id',1)
+    edges2 = merge(edges2,nodes,how='right',left_on=M2.c,right_on='node_id').drop('node_id',1)
+
+    nodes1 = set(M1.nodes(M1.p)[M1.p].values)
+    nodes2 = set(M2.nodes(M2.p)[M2.p].values)
+    p_total_nodes     = len(nodes1|nodes2)
+    p_repeated_nodes  = len(nodes1.intersection(nodes2))
+    p_f_missing_nodes = 1.-len(nodes1.intersection(nodes2))/float(len(nodes1|nodes2))
+    p_f_missing_1     = 1.-len(nodes1)/float(len(nodes1|nodes2))
+    p_f_missing_2     = 1.-len(nodes2)/float(len(nodes1|nodes2))        
+
+    nodes_p = list(nodes1.intersection(nodes2))
+    nodes = DataFrame(nodes_p,columns=['node_id'])
+    edges1 = merge(edges1,nodes,how='right',left_on=M1.p,right_on='node_id').drop('node_id',1)
+    edges2 = merge(edges2,nodes,how='right',left_on=M2.p,right_on='node_id').drop('node_id',1)
+    
+    edges1['edge'] = edges1[M1.c].astype(str)+'-'+edges1[M1.p].astype(str)
+    edges2['edge'] = edges2[M2.c].astype(str)+'-'+edges2[M1.p].astype(str)
+    edges1 = set(edges1['edge'].values.tolist())
+    edges2 = set(edges2['edge'].values.tolist())
+
+    e_total_edges     = len(edges1|edges2)
+    e_f_missing_edges = 1.-len(edges1.intersection(edges1))/float(len(edges1|edges2))
+    e_f_missing_1     = 1.-len(edges1)/float(len(edges1|edges2))
+    e_f_missing_2     = 1.-len(edges2)/float(len(edges1|edges2))
+
+    M1.filter_nodes(nodes_c=nodes_c,nodes_p=nodes_p)
+    M2.filter_nodes(nodes_c=nodes_c,nodes_p=nodes_p)
+    M1.build_net(progress=False)
+    M2.build_net(progress=False)
+
+    edges1 = M1.net[[M1.c,M1.p]]
+    edges2 = M2.net[[M2.c,M2.p]]
+    edges1['edge'] = edges1[M1.c].astype(str)+'-'+edges1[M1.p].astype(str)
+    edges2['edge'] = edges2[M2.c].astype(str)+'-'+edges2[M1.p].astype(str)
+    edges1 = set(edges1['edge'].values.tolist())
+    edges2 = set(edges2['edge'].values.tolist())
+
+    f_total_edges     = len(edges1|edges2)
+    f_f_missing_edges = 1.-len(edges1.intersection(edges1))/float(len(edges1|edges2))
+    f_f_missing_1     = 1.-len(edges1)/float(len(edges1|edges2))
+    f_f_missing_2     = 1.-len(edges2)/float(len(edges1|edges2))
+
+    cp = merge(M1.projection(M1.c).rename(columns={'fi':'fi_1'}),M2.projection(M2.c).rename(columns={'fi':'fi_2'}),how='inner')
+    proj_c = corrcoef(cp['fi_1'],cp['fi_2'])[0,1]
+    cp = merge(M1.projection(M1.p).rename(columns={'fi':'fi_1'}),M2.projection(M2.p).rename(columns={'fi':'fi_2'}),how='inner')
+    proj_p = corrcoef(cp['fi_1'],cp['fi_2'])[0,1]
+
+    c_m1 = M1.c
+    c_m2 = M2.c
+    p_m1 = M1.p
+    p_m2 = M2.p
+
+    print 'Summary of comparing networks '+n1+' with '+n2
+    print ','.join(list(set([c_m1,c_m2])))
+    print '\tTotal nodes          :',c_total_nodes
+    print '\tTotal repeated nodes :',c_repeated_nodes
+    print '\tFracion missing nodes:',c_f_missing_nodes
+    print '\tMissing nodes on 1   :',c_f_missing_1
+    print '\tMissing nodes on 2   :',c_f_missing_2
+    print ''
+    print ','.join(list(set([p_m1,p_m2])))
+    print '\tTotal nodes          :',p_total_nodes
+    print '\tTotal repeated nodes :',p_repeated_nodes
+    print '\tFracion missing nodes:',p_f_missing_nodes
+    print '\tMissing nodes on 1   :',p_f_missing_1
+    print '\tMissing nodes on 2   :',p_f_missing_2
+    print ''
+    print ','.join(list(set([str(c_m1)+'-'+str(p_m1),str(c_m2)+'-'+str(p_m2)])))
+    print '\tTotal edges          :',e_total_edges
+    print '\tFracion missing edges:',e_f_missing_edges
+    print '\tMissing edges on 1   :',e_f_missing_1
+    print '\tMissing edges on 2   :',e_f_missing_2
+    print ''
+    print 'Filtered '+','.join(list(set([str(c_m1)+'-'+str(p_m1),str(c_m2)+'-'+str(p_m2)])))
+    print '\tTotal edges          :',f_total_edges
+    print '\tFracion missing edges:',f_f_missing_edges
+    print '\tMissing edges on 1   :',f_f_missing_1
+    print '\tMissing edges on 2   :',f_f_missing_2
+    print ''
+    print 'Projection ',','.join(list(set([c_m1,c_m2])))
+    print 'Correlation between fis:',proj_c
+    print ''
+    print 'Projection ',','.join(list(set([p_m1,p_m2])))
+    print 'Correlation between fis:',proj_p
+    print ''
