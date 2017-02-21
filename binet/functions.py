@@ -1,6 +1,6 @@
 from networkx import Graph,minimum_spanning_tree,number_connected_components,is_connected,connected_component_subgraphs
 from pandas import DataFrame,merge,concat,read_csv
-from numpy import array,matrix,mean,std,log
+from numpy import array,matrix,mean,std,log,sqrt
 from scipy.interpolate import interp1d
 from copy import deepcopy
 import json
@@ -311,6 +311,59 @@ def df_interp(df,by=None,x=None,y=None,kind='linear'):
     return DataFrame(interp,columns=[by,x,y])
 
 
+def r_test(Nhops,th=0,p_val=False,directed=True,s=None,t=None,n=None):    
+    '''
+    Calculates the correlation and tests its significance.
+
+    Parameters
+    ----------
+    Nhops : pandas.DataFrame
+        Table with source,target,N as columns.
+    th : float (default=0)
+        Threshold to test.
+        It tests whether r>th.
+    p_val : boolean (False)
+        If True it will return the p_value for each potential link.
+    directed : boolean (True)
+        If False it will treat each link as an undirected link.
+    s,t,n : str,str,str (optional)
+        Labels for the columns of Nhops that contain the source node (s), the target node (t), and the size of the flow (n).
+
+    Returns
+    -------
+    Nt : pandas.DataFrame
+        Table with s,t,n,r,t,95,99,p-value where:
+        r  : correlation coefficient
+        t  : t-statistic
+        95 : boolean whether to reject at one-sided 95% confidence (if True the link is significantly larger than th)
+        99 : boolean whether to reject at one-sided 99% confidence (if True the link is significantly larger than th)
+        p-value : (optional) p-value for the t-test
+    '''
+    s = Nhops.columns.values[0] if s is None else s
+    t = Nhops.columns.values[1] if t is None else t
+    n = Nhops.columns.values[2] if n is None else n
+    Nt = Nhops[Nhops.columns.values]
+    N = float(Nt[n].sum())
+    if not directed:
+        Nt = order_columns(Nt,s=None,t=None)
+        Nt = Nt.groupby([s,t]).sum().reset_index()
+        Ntt = pd.concat([Nt.groupby(s)[[n]].sum().reset_index().rename(columns={s:'tag'}),Nt.groupby(t)[[n]].sum().reset_index().rename(columns={t:'tag'})]).groupby('tag').sum()[[n]].reset_index()
+        Nt = pd.merge(Nt,Ntt.rename(columns={'tag':s,n:'n_s'}))
+        Nt = pd.merge(Nt,Ntt.rename(columns={'tag':t,n:'n_t'}))
+        Nt['r']=(N*Nt[n]-Nt['n_s']*Nt['n_t'])/sqrt(Nt['n_s']*Nt['n_t']*(N-Nt['n_s'])*(N-Nt['n_t']))
+    else:
+        Nt = pd.merge(Nt,Nhops.groupby(t).sum()[[n]].reset_index().rename(columns={n:'Np'}))
+        Nt = pd.merge(Nt,Nhops.groupby(s).sum()[[n]].reset_index().rename(columns={n:'Nm'}))
+        Nt['r']=(N*Nt[n]-Nt['Np']*Nt['Nm'])/np.sqrt(Nt['Np']*Nt['Nm']*(N-Nt['Np'])*(N-Nt['Nm']))
+    Nt['t']=sqrt(N-2.)*(Nt['r']/sqrt(1.-Nt['r']**2)-th/sqrt(1.-th**2))
+    Nt['95'] = False
+    Nt['99'] = False
+    Nt.loc[Nt['t']>=1.645,'95'] = True
+    Nt.loc[Nt['t']>=2.326,'99'] = True
+    if p_val:
+        Nt['p-value']=[1.-norm.cdf(tval) for tval in Nt['t']]
+        return Nt[[s,t,n,'r','t','95','99','p-value']]
+    return Nt[[s,t,n,'r','t','95','99']]
 
 
 
