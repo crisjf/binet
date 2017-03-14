@@ -222,6 +222,7 @@ def build_connected(net,th,s=None,t=None,w=None,directed=False,progress=True):
         if progress:
             print 'N edges:',len(T.edges())
             print 'N nodes:',len(T.nodes())
+            print 'Avg deg:',2*len(T.edges())/float(len(T.nodes()))
         out = []
         for u,v in T.edges():
             out.append((u,v,-T.get_edge_data(u, v)['weight']))
