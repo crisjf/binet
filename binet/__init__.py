@@ -2,4 +2,4 @@
 from classes import mcp,tnet,BiGraph,gGraph
 from functions import build_connected,build_html,CalculateComplexity,calculateRCA,df_interp,order_columns,flatten,compare_nets,r_test
 from functions_dl import WDI_get,trade_data
-from functions_gt import get_pos
+from functions_gt import get_pos,get_comms
