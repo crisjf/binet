@@ -347,14 +347,14 @@ def r_test(Nhops,th=0,p_val=False,directed=True,s=None,t=None,n=None):
     if not directed:
         Nt = order_columns(Nt,s=None,t=None)
         Nt = Nt.groupby([s,t]).sum().reset_index()
-        Ntt = pd.concat([Nt.groupby(s)[[n]].sum().reset_index().rename(columns={s:'tag'}),Nt.groupby(t)[[n]].sum().reset_index().rename(columns={t:'tag'})]).groupby('tag').sum()[[n]].reset_index()
-        Nt = pd.merge(Nt,Ntt.rename(columns={'tag':s,n:'n_s'}))
-        Nt = pd.merge(Nt,Ntt.rename(columns={'tag':t,n:'n_t'}))
+        Ntt = concat([Nt.groupby(s)[[n]].sum().reset_index().rename(columns={s:'tag'}),Nt.groupby(t)[[n]].sum().reset_index().rename(columns={t:'tag'})]).groupby('tag').sum()[[n]].reset_index()
+        Nt = merge(Nt,Ntt.rename(columns={'tag':s,n:'n_s'}))
+        Nt = merge(Nt,Ntt.rename(columns={'tag':t,n:'n_t'}))
         Nt['r']=(N*Nt[n]-Nt['n_s']*Nt['n_t'])/sqrt(Nt['n_s']*Nt['n_t']*(N-Nt['n_s'])*(N-Nt['n_t']))
     else:
-        Nt = pd.merge(Nt,Nhops.groupby(t).sum()[[n]].reset_index().rename(columns={n:'Np'}))
-        Nt = pd.merge(Nt,Nhops.groupby(s).sum()[[n]].reset_index().rename(columns={n:'Nm'}))
-        Nt['r']=(N*Nt[n]-Nt['Np']*Nt['Nm'])/np.sqrt(Nt['Np']*Nt['Nm']*(N-Nt['Np'])*(N-Nt['Nm']))
+        Nt = merge(Nt,Nhops.groupby(t).sum()[[n]].reset_index().rename(columns={n:'Np'}))
+        Nt = merge(Nt,Nhops.groupby(s).sum()[[n]].reset_index().rename(columns={n:'Nm'}))
+        Nt['r']=(N*Nt[n]-Nt['Np']*Nt['Nm'])/sqrt(Nt['Np']*Nt['Nm']*(N-Nt['Np'])*(N-Nt['Nm']))
     Nt['t']=sqrt(N-2.)*(Nt['r']/sqrt(1.-Nt['r']**2)-th/sqrt(1.-th**2))
     Nt['95'] = False
     Nt['99'] = False
