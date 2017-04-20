@@ -73,6 +73,51 @@ class gGraph(Graph):
 
             return DataFrame(out,columns=[self.node_id]+properties)
 
+    def degree(self,nbunch=None,as_df=False,weighted=False):
+        '''
+        Return the degree of a node or nodes.
+
+        The node degree is the number of edges adjacent to that node.
+
+        Parameters
+        ----------
+        nbunch : iterable container, optional (default=all nodes)
+            A container of nodes.  The container will be iterated
+            through once.
+
+        as_df : boolean (False)
+            If True it will return the a pandas.DataFrame
+
+        weighted : boolean (False)
+            If True, it will return a the weighted degree using 'weight' as the weight. 
+
+        Returns
+        -------
+        nd : dictionary or pandas.DataFrame
+            A dictionary with nodes as keys and degree as values.
+            If as_df=True it returns a pandas.DataFrame with:
+                node_id : Node identifier
+                degree : Unweighted degree
+                degree_w : Weighted degree
+        '''
+        if as_df:
+            deg = super(gGraph,self).degree(nbunch=nbunch).items()
+            deg = DataFrame(deg,columns=[self.node_id,'degree'])
+            if weighted:
+                deg_w = super(gGraph,self).degree(nbunch=nbunch,weight='weight').items()
+                deg_w = DataFrame(deg_w,columns=[self.node_id,'degree_w'])
+                return merge(deg,deg_w)
+            else:
+                return deg
+        else:
+            if weighted:
+                return super(gGraph,self).degree(nbunch=nbunch,weight='weight')
+            else:
+                return super(gGraph,self).degree(nbunch=nbunch).items()
+
+
+
+
 
 class BiGraph(Graph):
     def __init__(self,side=0,aside=1):
@@ -569,6 +614,14 @@ class mcp(BiGraph):
         self.set_edge_attributes('RCA',dict(zip(zip(net[self.c].values,net[self.p].values),net['RCA'].values)))
         self.set_edge_attributes('x',dict(zip(zip(net[self.c].values,net[self.p].values),net['x'].values)))
 
+    def CalculateComplexity(self):
+        A = self.edges(as_df=True)
+        A['adj']=1
+        A = A.pivot(index=self.c,columns=self.p,values='adj').fillna(0)
+        PCI,ECI = CalculateComplexity(A.as_matrix())
+        PCI = DataFrame(zip(A.columns.values,PCI),columns=[self.p,'PCI'])
+        ECI = DataFrame(zip(A.index.values,ECI),columns=[self.c,'ECI'])
+        return ECI,PCI
 
     def filter_nodes(self,side,node_list,keep=True):
         '''
@@ -630,6 +683,29 @@ class mcp(BiGraph):
             av_ind['avg_'+ind] = av_ind['s_'+side]*av_ind[ind]/av_ind['N_'+aside]
             self._nodes[aside] = merge(self._nodes[aside],av_ind[[aside,'avg_'+ind]].groupby(aside).sum().reset_index(),how='left',left_on=aside,right_on=aside)
 
+    def recombination_ease(self,side):
+        G = self.projection(side)
+        E = merge(G.degree(as_df=True).rename(columns={'degree':'n_c'}),self.degree(side,as_df=True).rename(columns={'degree':'n_p'}))
+        #E = merge(G.degree(as_df=True,weighted=True).drop('degree',1).rename(columns={'degree_w':'n_c'}),self.degree(side,as_df=True).rename(columns={'degree':'n_p'}))
+        E['E'] = E['n_c']/E['n_p']
+        return E[[side,'E']]
+
+    def NK_complexity(self,side):
+        aside = self.c if side == self.p else self.p
+        E = self.recombination_ease(aside)
+
+        K = merge(self.edges(as_df=True),E)[[side,aside,'E']]
+        K = merge(K.groupby(side).sum()[['E']].reset_index(),K.groupby(side).count()[[aside]].reset_index().rename(columns={aside:'n_c'}))
+        K['K'] = K['n_c']/K['E']
+        return K[[side,'K']]
+
+    def entropy(self,side):
+        data = self.data[[self.c,self.p,'x']]
+        S = merge(data,data.groupby(side).sum()[['x']].reset_index().rename(columns={'x':'N_i'}))
+        S['s'] = (S['x']/S['N_i'].astype(float))
+        S['s'] = -log(S['s'])*S['s']
+        S = S.groupby(side).sum()[['s']].reset_index()
+        return S
 
     def _get_size(self,side):
         g = self.projection(side)
