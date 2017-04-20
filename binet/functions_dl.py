@@ -1,5 +1,6 @@
 from requests import get
 import io,urllib2,bz2
+from pandas import read_csv,DataFrame,merge
 
 def WDI_get(var_name,start_year=None,end_year=None):
     """Retrieves the given development indicator from the World Bank website.
