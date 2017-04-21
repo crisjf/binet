@@ -610,17 +610,23 @@ class mcp(BiGraph):
             Threshold to use. If RCA=True is the RCA threshold, if RCA=False is the flow threshold.
         '''
         self.remove_edges_from(self.edges())
+        print 'Old edges removed'
         header = '' if self.name == '' else self.name + ': '
         if 'RCA' not in self.data.columns.values:
             self._calculate_RCA()
+            print 'RCA Calculated'
         if RCA:
             net = self.data[(self.data['RCA']>=th)&(self.data['x']>=xth)][[self.c,self.p,'RCA','x']]
+            print 'Filtered'
         else:
             print 'Warning: th should be provided.'
             net = self.data[self.data['x']>=th][[self.c,self.p,'RCA','x']]
         self.add_edges_from(zip(net[self.c].values,net[self.p].values))
+        print 'Edges added'
         self.set_edge_attributes('RCA',dict(zip(zip(net[self.c].values,net[self.p].values),net['RCA'].values)))
+        print 'RCA attribute added'
         self.set_edge_attributes('x',dict(zip(zip(net[self.c].values,net[self.p].values),net['x'].values)))
+        print 'x attribute added'
 
     def CalculateComplexity(self):
         A = self.edges(as_df=True)
