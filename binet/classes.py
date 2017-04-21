@@ -609,6 +609,7 @@ class mcp(BiGraph):
         th       : float (default=1)
             Threshold to use. If RCA=True is the RCA threshold, if RCA=False is the flow threshold.
         '''
+        print 'Last try'
         self.remove_edges_from(self.edges())
         print 'Old edges removed'
         header = '' if self.name == '' else self.name + ': '
