@@ -505,21 +505,16 @@ class mcp(BiGraph):
         self.c = c if c is not None else 'c'
         self.p = p if p is not None else 'p'
         super(mcp,self).__init__(side=self.c,aside=self.p)
-        print 'Created class'
         self.data = None
         self.load_links_data(data,use=use)
-        print 'Loaded edges'
         self.name = name
         self.size = {self.c:None,self.p:None}
         if nodes_c is not None:
             self.load_nodes_data(self.c,nodes_c)
-            print 'Loaded nodes c' 
         if nodes_p is not None:
             self.load_nodes_data(self.p,nodes_p)
-            print 'Loaded nodes c'
         if self.data is not None:
             self.build_net()
-            print 'Network built'
 
     def __str__(self):
         out = ''
@@ -585,14 +580,11 @@ class mcp(BiGraph):
             If use is not provided, it will look for a column named side.
         """
         self._check_side(side)
-        print 'Checked side'
         use = [side]+nodes_data.drop(side,1).columns.values.tolist() if use is None else use
         nodes_data = merge(self.nodes(side,as_df=True)[[side]],nodes_data[use],how='left').fillna('NA')[use]
-        print 'Selected data'
         for name in use[1:]:
             values = dict(zip(nodes_data[use[0]].values,nodes_data[name].values))
             self.set_node_attributes(side,name,values)
-            print name
 
     def _calculate_RCA(self):
         self.data = merge(self.data,calculateRCA(self.data,c=self.c,p=self.p,x='x',shares=True).drop('x',1),how='left',left_on=[self.c,self.p],right_on=[self.c,self.p])
@@ -609,25 +601,18 @@ class mcp(BiGraph):
         th       : float (default=1)
             Threshold to use. If RCA=True is the RCA threshold, if RCA=False is the flow threshold.
         '''
-        print 'Last try'
         self.remove_edges_from(self.edges())
-        print 'Old edges removed'
         header = '' if self.name == '' else self.name + ': '
         if 'RCA' not in self.data.columns.values:
             self._calculate_RCA()
-            print 'RCA Calculated'
         if RCA:
             net = self.data[(self.data['RCA']>=th)&(self.data['x']>=xth)][[self.c,self.p,'RCA','x']]
-            print 'Filtered'
         else:
             print 'Warning: th should be provided.'
             net = self.data[self.data['x']>=th][[self.c,self.p,'RCA','x']]
         self.add_edges_from(zip(net[self.c].values,net[self.p].values))
-        print 'Edges added'
         self.set_edge_attributes('RCA',dict(zip(zip(net[self.c].values,net[self.p].values),net['RCA'].values)))
-        print 'RCA attribute added'
         self.set_edge_attributes('x',dict(zip(zip(net[self.c].values,net[self.p].values),net['x'].values)))
-        print 'x attribute added'
 
     def CalculateComplexity(self):
         A = self.edges(as_df=True)
