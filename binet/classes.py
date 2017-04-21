@@ -505,16 +505,21 @@ class mcp(BiGraph):
         self.c = c if c is not None else 'c'
         self.p = p if p is not None else 'p'
         super(mcp,self).__init__(side=self.c,aside=self.p)
+        print 'Created class'
         self.data = None
         self.load_links_data(data,use=use)
+        print 'Loaded edges'
         self.name = name
         self.size = {self.c:None,self.p:None}
         if nodes_c is not None:
             self.load_nodes_data(self.c,nodes_c)
+            print 'Loaded nodes c' 
         if nodes_p is not None:
             self.load_nodes_data(self.p,nodes_p)
+            print 'Loaded nodes c'
         if self.data is not None:
             self.build_net()
+            print 'Network built'
 
     def __str__(self):
         out = ''
