@@ -585,11 +585,14 @@ class mcp(BiGraph):
             If use is not provided, it will look for a column named side.
         """
         self._check_side(side)
+        print 'Checked side'
         use = [side]+nodes_data.drop(side,1).columns.values.tolist() if use is None else use
         nodes_data = merge(self.nodes(side,as_df=True)[[side]],nodes_data[use],how='left').fillna('NA')[use]
+        print 'Selected data'
         for name in use[1:]:
             values = dict(zip(nodes_data[use[0]].values,nodes_data[name].values))
             self.set_node_attributes(side,name,values)
+            print name
 
     def _calculate_RCA(self):
         self.data = merge(self.data,calculateRCA(self.data,c=self.c,p=self.p,x='x',shares=True).drop('x',1),how='left',left_on=[self.c,self.p],right_on=[self.c,self.p])
