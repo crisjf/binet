@@ -356,7 +356,43 @@ class BiGraph(Graph):
         for prop in properties:
             values = dict(zip(nodes[side].values,nodes[prop].values))
             set_node_attributes(self.P[side],prop,values)
+
+    def _project_NK(self,side):
+        """
+        Builds the projection of the bipartite network on to the chosen side.
+        The projection is done using the NK conditional probability.
+
+        Parameters
+        ----------
+        side : int or str
+            Tags for each side of the bipartite network.
+        """
+        self._check_side(side)
+        aside = self.side if side == self.aside else self.aside
+
+        E = self.recombination_ease(aside)
+        net = self.edges(as_df=True)[[side,aside]]
+        nodes = merge(E,net).groupby(side).sum()[['E']].reset_index().reset_index().rename(columns={'index':side+'_index'})
+
+        dis = merge(E,merge(net,net,how='inner',left_on=aside,right_on=aside))
+        dis = dis.groupby([side+'_x',side+'_y']).sum()[['E']].reset_index().rename(columns={'E':'E_both'})
+        dis = merge(dis,nodes,how='left',right_on=side,left_on=side+'_x').drop(side,1)
+        dis = merge(dis,nodes,how='left',right_on=side,left_on=side+'_y').drop(side,1)
+        dis = dis[dis[side+'_index_x']>dis[side+'_index_y']].drop([side+'_index_x',side+'_index_y'],1)
+        dis['p_x'] = dis['E_both']/dis['E_x'].astype(float)
+        dis['p_y'] = dis['E_both']/dis['E_y'].astype(float)
+        dis['fi'] = dis[['p_x','p_y']].min(1)
+        dis = dis[[side+'_x',side+'_y','fi']]
         
+        self.P[side] = gGraph(node_id=side)
+        self.P[side].add_weighted_edges_from([val[1:] for val in dis.itertuples()])
+        nodes = merge(self.P[side].nodes(as_df=True),self.nodes(side,as_df=True),how='left')
+        properties = nodes.columns.values.tolist()
+        properties.remove(side)
+        for prop in properties:
+            values = dict(zip(nodes[side].values,nodes[prop].values))
+            set_node_attributes(self.P[side],prop,values)
+
     def projection(self,side,as_df=False,ptype=None):
         """
         Returns the network projection (will calculate if it does not exist).
@@ -369,7 +405,7 @@ class BiGraph(Graph):
             If True it returns the projection as a DataFrame
         ptype : str ('CP')
             Similarity index used to calculate the projection.
-            Choose between conditional probability ('CP') and adamic-adamar ('AA').
+            Choose between conditional probability ('CP'), adamic-adamar ('AA'), and K-plexity ('NK').
 
         Returns
         ----------
@@ -383,6 +419,8 @@ class BiGraph(Graph):
                 self._project_CP(side)
             elif self._ptype == 'AA':
                 self._project_AA(side)
+            elif self._ptype == 'NK':
+                self._project_NK(side)
             else:
                 raise NameError("Unrecognized projection type.")
 
@@ -470,10 +508,6 @@ class BiGraph(Graph):
         if show:
             webbrowser.open(path+out)
             print 'OUT: ',path+out
-
-
-
-
 
 class mcp(BiGraph):
     def __init__(self,c=None,p=None,name='',data=None,use=None,nodes_c=None,nodes_p=None):
@@ -684,11 +718,19 @@ class mcp(BiGraph):
             self._nodes[aside] = merge(self._nodes[aside],av_ind[[aside,'avg_'+ind]].groupby(aside).sum().reset_index(),how='left',left_on=aside,right_on=aside)
 
     def recombination_ease(self,side):
-        G = self.projection(side)
-        E = merge(G.degree(as_df=True).rename(columns={'degree':'n_c'}),self.degree(side,as_df=True).rename(columns={'degree':'n_p'}))
-        #E = merge(G.degree(as_df=True,weighted=True).drop('degree',1).rename(columns={'degree_w':'n_c'}),self.degree(side,as_df=True).rename(columns={'degree':'n_p'}))
-        E['E'] = E['n_c']/E['n_p']
-        return E[[side,'E']]
+        nodes = self.nodes(side,as_df=True)
+        if 'E' not in nodes.columns:
+            aside = self.side if side == self.aside else self.aside
+            net = self.edges(as_df=True)[[side,aside]]
+            dis = merge(net,net,how='inner',left_on=aside,right_on=aside)[[side+'_x',side+'_y']].drop_duplicates()
+            dis = dis[dis[side+'_x']!=dis[side+'_y']]
+            E = merge(dis.groupby(side+'_x').count().reset_index().rename(columns={side+'_y':'n_c'}).rename(columns={side+'_x':side}),net.groupby(side).count().reset_index().rename(columns={aside:'n_p'}),how='outer').fillna(0)
+            E['E'] = E['n_c']/E['n_p']
+            E = E[[side,'E']]
+            self.set_node_attributes(side,'E',dict(E.values))
+            return E
+        else:
+            return nodes[[side,'E']]
 
     def NK_complexity(self,side):
         aside = self.c if side == self.p else self.p
