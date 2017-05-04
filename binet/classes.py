@@ -1,4 +1,4 @@
-from pandas import DataFrame,merge
+from pandas import DataFrame,merge,concat
 from collections import defaultdict
 from numpy import sqrt,mean,corrcoef,log
 from networkx import Graph,set_node_attributes,set_edge_attributes
@@ -649,6 +649,13 @@ class mcp(BiGraph):
         self.set_edge_attributes('x',dict(zip(zip(net[self.c].values,net[self.p].values),net['x'].values)))
 
     def CalculateComplexity(self):
+        '''
+        Calculates the Hidalgo-Hausmann Economic Complexity Index.
+
+        Example
+        -------
+        >> ECI,PCI = M.CalculateComplexity()
+        '''
         A = self.edges(as_df=True)
         A['adj']=1
         A = A.pivot(index=self.c,columns=self.p,values='adj').fillna(0)
@@ -761,13 +768,12 @@ class mcp(BiGraph):
             F[u] = w
         self.size[side] = F
 
-    def densities(self,side,m=None):
+    def densities(self,side,m=None,ptype=None):
         '''
-        Calculates the densities according to the projection of self into size.
-        If m is passed, it will calculate the densities according to self's projection and m's links.
+        Calculates all the nonzero densities according to the projection of self into side.
+        If m is given, it will calculate the densities according to self's projection and m's links.
 
-        For example, self can be the country-product space calculated using data from 2003 to 2010, and m can be the country-product space using only data from 2010.
-        Then, the data from 2003 to 2010 is used to build the product-space, and the data from 2010 is used to calculate the densities.
+        For example, self can be the industry-occupation space, and m can be the region-industry space.
 
         Parameters
         ----------
@@ -776,6 +782,8 @@ class mcp(BiGraph):
             To recover the product-space densities, side = p
         m : binet.mcp (optional)
             If provided, it will consider the links between c and p as provided by m.
+        ptype : str (default='CP')
+            Type of projection to use as weights.
 
         Returns
         -------
@@ -788,26 +796,22 @@ class mcp(BiGraph):
 
         '''
         m=self if m is None else m
-        self._check_side(side)
-        if self.size[side] is None:
-            self._get_size(side)
-        F = self.size[side]
         aside = self.c if side == self.p else self.p
-        g = self.projection(side)
-
-        W = []
-        for c in self.nodes(aside):
-            f = {}
-            ps = set(m.neighbors(c))
-            for u in g.nodes():
-                w = 0.
-                for v in ps:
-                    ww = g.get_edge_data(u,v)
-                    if ww is not None:
-                        w += ww['weight']
-                f[u] = w
-            W += [(c,u,f[u]/F[u],(u in ps)) for u in g.nodes()]
-        return DataFrame(W,columns=[aside,side,'w','mcp'])
+        maside = m.c if side == m.p else m.p
+        if (ptype is not None)&(ptype not in set(['CP','NK'])):
+            raise NameError('Projection type not supported:'+str(ptype))
+        P = self.projection(side,ptype=ptype)
+        P = P.edges(as_df=True)
+        P = concat([P,P[[side+'_y',side+'_x','weight']].rename(columns={side+'_y':side+'_x',side+'_x':side+'_y'})]).drop_duplicates().rename(columns={side+'_x':side})
+        m = m.edges(as_df=True)[[m.c,m.p]]
+        w = merge(m.rename(columns={side:side+'_y'}),P,how='left').fillna(0).groupby([maside,side]).sum()[['weight']].reset_index().rename(columns={'weight':'num'})
+        P = P.groupby(side).sum()[['weight']].reset_index().rename(columns={'weight':'den'})
+        w = merge(w,P)
+        w['w'] = w['num']/w['den']
+        w = w[[maside,side,'w']]
+        m['mcp'] = 1
+        w = merge(w,m,how='outer').fillna(0)
+        return w
 
     def to_csv(self,side=None,th=None,path='',th_low=None,report=False):
         '''Dumps one of the projections into two csv files (name_side_nodes.csv,name_side_edges.csv).
