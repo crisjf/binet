@@ -105,6 +105,44 @@ def CalculateComplexity(M,th=0.0001):
     return ECI.tolist(),PCI.tolist()
 
 
+def CalculateComplexityPlus(X,th=0.0001):
+    '''
+    This is just a placeholder for now.
+    The code is pseudocode and needs to be testes.
+    X_c^2 = \sum_p \frac{X_{cp}} {\sum_{c'} \frac{X_{c'p}}{X_{c'}^1}}
+
+    Parameters
+    ----------
+    X : numpy array.
+        Represents the export matrix. Both the sum of the rows and the sum of the columns must contain non-zero entries.
+    th : scalar.
+        The stopping criteria for the method of reflections.
+    
+    Returns
+    ----------
+    ECIp : list
+        Economic Complexity Index Plus for the rows of X.
+    PCIp : list
+        Product Compleixty Index Plus for the columns of X.
+    '''
+    Xc0 = X.sum(1)
+    Xp0 = X.sum(0)
+    if any(Xc0==0)|any(Xp0==0):
+        raise NameError('One dimension has a null sum')
+    it_count=0
+    while True:
+        it_count+=1
+        Den = (X/Xc0).sum(0) #Not sure here
+        Xc1 = (X/Den).sum(1) #Not sure here either
+        if all(abs(Xc1-Xc0)<th):
+            Xc = Xc1[:]
+            break
+        Xc0 = Xc1[:]
+        if it_count>=1000:
+            raise NameError('No convergence after 1000 iterations')
+    ECIp = log(Xc)-log((X/Xp0).sum(1))
+    return ECIp.tolist()
+
 def order_columns(net,s=None,t=None):
     '''
     Makes sure that the label for the source node is larger than the label for the target node.
