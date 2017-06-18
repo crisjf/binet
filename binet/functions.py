@@ -127,21 +127,35 @@ def CalculateComplexityPlus(X,th=0.0001):
     '''
     Xc0 = X.sum(1)
     Xp0 = X.sum(0)
+    C = len(Xc0)
+    P = len(Xp0)
     if any(Xc0==0)|any(Xp0==0):
         raise NameError('One dimension has a null sum')
+    
     it_count=0
     while True:
         it_count+=1
         Den = (X/Xc0).sum(0) #Not sure here
         Xc1 = (X/Den).sum(1) #Not sure here either
-        if all(abs(Xc1-Xc0)<th):
+        prod = exp(sum(log(Xc1)))
+        Xc1 = Xc1/((prod)**(1./C))
+
+        Den = (X/Xp0).sum(1) #Not sure here
+        Xp1 = (X/Den).sum(0) #Not sure here either
+        prod = exp(sum(log(Xp1)))
+        Xp1 = Xp1/((prod)**(1./P))
+        if all(abs(Xc1-Xc0)<th)&all(abs(Xp1-Xp0)<th):
             Xc = Xc1[:]
+            Xp = Xp1[:]
+            Xc0 = X.sum(1)
+            Xp0 = X.sum(0)
             break
         Xc0 = Xc1[:]
         if it_count>=1000:
             raise NameError('No convergence after 1000 iterations')
     ECIp = log(Xc)-log((X/Xp0).sum(1))
-    return ECIp.tolist()
+    PCIp = log(Xp0)-log(Xp)
+    return ECIp.tolist(),PCIp.tolist()
 
 def order_columns(net,s=None,t=None):
     '''
