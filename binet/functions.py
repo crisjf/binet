@@ -1,6 +1,6 @@
 from networkx import Graph,minimum_spanning_tree,number_connected_components,is_connected,connected_component_subgraphs
 from pandas import DataFrame,merge,concat,read_csv
-from numpy import array,matrix,mean,std,log,sqrt
+from numpy import array,matrix,mean,std,log,sqrt,exp
 from scipy.interpolate import interp1d
 from copy import deepcopy
 import json
@@ -61,9 +61,9 @@ def getJenksBreaks( dataList, numClass ):
 
 
 def CalculateComplexity(M,th=0.0001):
-    '''Calculates the Economic Complexity Index following the method of reflections presented in
+    '''
+    Calculates the Economic Complexity Index following the method of reflections presented in
     Hidalgo and Hausmann 2010, The building blocks of economic complexity.
-    THIS FUNCTION NEEDS TO BE TESTED!!!
 
     Parameters
     ----------
@@ -105,10 +105,9 @@ def CalculateComplexity(M,th=0.0001):
     return ECI.tolist(),PCI.tolist()
 
 
-def CalculateComplexityPlus(X,th=0.0001):
+def CalculateComplexityPlus(X,th=0.001):
     '''
-    This is just a placeholder for now.
-    The code is pseudocode and needs to be testes.
+    Calculates the Economic Complexity Index Plus .
     X_c^2 = \sum_p \frac{X_{cp}} {\sum_{c'} \frac{X_{c'p}}{X_{c'}^1}}
 
     Parameters
@@ -116,7 +115,7 @@ def CalculateComplexityPlus(X,th=0.0001):
     X : numpy array.
         Represents the export matrix. Both the sum of the rows and the sum of the columns must contain non-zero entries.
     th : scalar.
-        The stopping criteria for the method of reflections.
+        The stopping criteria.
     
     Returns
     ----------
@@ -125,36 +124,47 @@ def CalculateComplexityPlus(X,th=0.0001):
     PCIp : list
         Product Compleixty Index Plus for the columns of X.
     '''
+    Xc = X.sum(1)
+    Xp = X.sum(0)
     Xc0 = X.sum(1)
-    Xp0 = X.sum(0)
-    C = len(Xc0)
-    P = len(Xp0)
-    if any(Xc0==0)|any(Xp0==0):
+    Xp0 = (X.transpose()/Xc0).sum(1)
+    C = float(len(Xc))
+    P = float(len(Xp))
+    if any(Xc==0)|any(Xp==0):
         raise NameError('One dimension has a null sum')
     
+    ECIp0 = log(Xc0)-log((X/Xp).sum(1))
+    PCIp0 = log(Xp)-log(Xp0) 
     it_count=0
     while True:
         it_count+=1
-        Den = (X/Xc0).sum(0) #Not sure here
-        Xc1 = (X/Den).sum(1) #Not sure here either
-        prod = exp(sum(log(Xc1)))
-        Xc1 = Xc1/((prod)**(1./C))
+        Den = (X.transpose()/Xc0).sum(1)
+        Xc1 = (X/Den).sum(1)
+        norm = exp(sum(log(Xc1)*(1./C)))
+        Xc1 = Xc1/norm
 
-        Den = (X/Xp0).sum(1) #Not sure here
-        Xp1 = (X/Den).sum(0) #Not sure here either
-        prod = exp(sum(log(Xp1)))
-        Xp1 = Xp1/((prod)**(1./P))
-        if all(abs(Xc1-Xc0)<th)&all(abs(Xp1-Xp0)<th):
-            Xc = Xc1[:]
-            Xp = Xp1[:]
-            Xc0 = X.sum(1)
-            Xp0 = X.sum(0)
+        Den = (X/Xp0).sum(1)
+        Xp1 = (X.transpose()/Den).sum(1)
+        norm = exp(sum(log(Xp1)*(1./P)))
+        Xp1 = Xp1/norm
+    
+        ECIp1 = log(Xc1)-log((X/Xp).sum(1))
+        PCIp1 = log(Xp)-log(Xp1)
+    
+        if all(abs((ECIp0-ECIp1)/ECIp0)<th)&all(abs((PCIp0-PCIp1)/PCIp0)<th):
+            PCIp = PCIp1[:]
+            ECIp = ECIp1[:]
             break
+        if it_count>=5000:
+            raise NameError('No convergence after 5000 iterations')
+        PCIp0 = PCIp1[:]
+        ECIp0 = ECIp1[:]
         Xc0 = Xc1[:]
-        if it_count>=1000:
-            raise NameError('No convergence after 1000 iterations')
-    ECIp = log(Xc)-log((X/Xp0).sum(1))
-    PCIp = log(Xp0)-log(Xp)
+        Xp0 = Xp1[:]
+    ECIp = exp(ECIp)
+    ECIp = (ECIp-mean(ECIp))/std(ECIp)
+    PCIp = -exp(PCIp) #This is a modification to the original formula 
+    PCIp = (PCIp-mean(PCIp))/std(PCIp)
     return ECIp.tolist(),PCIp.tolist()
 
 def order_columns(net,s=None,t=None):

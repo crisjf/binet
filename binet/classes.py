@@ -2,7 +2,7 @@ from pandas import DataFrame,merge,concat
 from collections import defaultdict
 from numpy import sqrt,mean,corrcoef,log
 from networkx import Graph,set_node_attributes,set_edge_attributes
-from functions import calculateRCA,CalculateComplexity,build_connected,build_html
+from functions import calculateRCA,CalculateComplexity,build_connected,build_html,CalculateComplexityPlus
 from functions_gt import get_pos
 from os import getcwd
 import webbrowser
@@ -13,7 +13,6 @@ class gGraph(Graph):
     def __init__(self,node_id=None):
         '''
         Wrapper for nx.Graph() class that integrates it with pandas.
-        I use it for the projections.
         '''
         self.node_id = 'node_id' if node_id is None else node_id
         super(gGraph,self).__init__()
@@ -650,7 +649,7 @@ class mcp(BiGraph):
         self.set_edge_attributes('RCA',dict(zip(zip(net[self.c].values,net[self.p].values),net['RCA'].values)))
         self.set_edge_attributes('x',dict(zip(zip(net[self.c].values,net[self.p].values),net['x'].values)))
 
-    def CalculateComplexity(self):
+    def CalculateComplexity(self,th=0.0001):
         '''
         Calculates the Hidalgo-Hausmann Economic Complexity Index.
 
@@ -661,9 +660,26 @@ class mcp(BiGraph):
         A = self.edges(as_df=True)
         A['adj']=1
         A = A.pivot(index=self.c,columns=self.p,values='adj').fillna(0)
-        PCI,ECI = CalculateComplexity(A.as_matrix())
+        ECI,PCI = CalculateComplexity(A.as_matrix(),th=th)
         PCI = DataFrame(zip(A.columns.values,PCI),columns=[self.p,'PCI'])
         ECI = DataFrame(zip(A.index.values,ECI),columns=[self.c,'ECI'])
+        return ECI,PCI
+
+    def CalculateComplexityPlus(self,th=0.001):
+        '''
+        Calculates the Hidalgo Economic Complexity Plus Index.
+
+        Example
+        -------
+        >> ECI,PCI = M.CalculateComplexityPlus()
+        '''
+        A = self.edges(as_df=True)
+        A['adj']=1
+        A = A.pivot(index=self.c,columns=self.p,values='adj').fillna(0)
+        X = A.as_matrix()
+        ECI,PCI = CalculateComplexityPlus(X,th=th)
+        PCI = DataFrame(zip(A.columns.values,PCI),columns=[self.p,'PCIp'])
+        ECI = DataFrame(zip(A.index.values,ECI),columns=[self.c,'ECIp'])
         return ECI,PCI
 
     def filter_nodes(self,side,node_list,keep=True):
