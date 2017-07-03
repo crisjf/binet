@@ -5,6 +5,42 @@ from scipy.interpolate import interp1d
 from copy import deepcopy
 import json
 
+def densities(m,fi):
+    '''
+    Calculates the density of related entities.
+    
+    Parameters
+    ----------
+    m : pandas.DataFrame
+        Groups to which group the entities.
+        For example, they can be countries and products produced by countries.
+        Has the colums:
+            group_id,entity_id
+    fi : pandas.DataFrame
+        Table with relatedness between entities.
+        Has the columns:
+            entity_id_source,entity_id_target,weight
+    
+    Returns
+    -------
+    W : pandas.DataFrame
+        Dataframe with the densities.
+        Has the columns:
+            group_id,entity_id,density,mcp
+    '''
+    g,side = m.columns.values[:2].tolist()
+    s,t,w = fi.columns.values[:3].tolist()
+    fi = pd.concat([fi,fi[[s,t,w]].rename(columns={s:t,t:s})]).drop_duplicates().rename(columns={s:side})
+    W = merge(m.rename(columns={side:t}),fi,how='left').fillna(0).groupby([g,side]).sum()[[w]].reset_index().rename(columns={w:'num'})
+    fi = fi.groupby(side).sum()[[w]].reset_index().rename(columns={w:'den'})
+    W = merge(W,fi)
+    W['w'] = W['num']/W['den']
+    W = W[[g,side,'w']]
+    m['mcp'] = 1
+    m = pd.merge(m,pd.DataFrame([(gg,ss) for gg in set(m[g]) for ss in set(m[side])],columns=[g,side]),how='outer').fillna(0)
+    W = merge(W,m,how='outer').fillna(0)
+    return W
+
 def getJenksBreaks( dataList, numClass ):
     dataList.sort()
     mat1 = []
@@ -105,7 +141,7 @@ def CalculateComplexity(M,th=0.0001):
     return ECI.tolist(),PCI.tolist()
 
 
-def CalculateComplexityPlus(X,th=0.001):
+def CalculateComplexityPlus(X,th=0.001,max_iter=5000):
     '''
     Calculates the Economic Complexity Index Plus .
     X_c^2 = \sum_p \frac{X_{cp}} {\sum_{c'} \frac{X_{c'p}}{X_{c'}^1}}
@@ -151,12 +187,17 @@ def CalculateComplexityPlus(X,th=0.001):
         ECIp1 = log(Xc1)-log((X/Xp).sum(1))
         PCIp1 = log(Xp)-log(Xp1)
     
-        if all(abs((ECIp0-ECIp1)/ECIp0)<th)&all(abs((PCIp0-PCIp1)/PCIp0)<th):
+        #if all(abs((ECIp0-ECIp1)/ECIp0)<th)&all(abs((PCIp0-PCIp1)/PCIp0)<th):
+        if (mean(abs((ECIp0-ECIp1)/ECIp0))<th)&(mean(abs((PCIp0-PCIp1)/PCIp0))<th):
             PCIp = PCIp1[:]
             ECIp = ECIp1[:]
             break
-        if it_count>=5000:
-            raise NameError('No convergence after 5000 iterations')
+        if it_count>=max_iter:
+            print('No convergence after '+str(max_iter)+' iterations')
+            print mean(abs((ECIp0-ECIp1)/ECIp0)),mean(abs((PCIp0-PCIp1)/PCIp0))
+            PCIp = PCIp1[:]
+            ECIp = ECIp1[:]
+            break
         PCIp0 = PCIp1[:]
         ECIp0 = ECIp1[:]
         Xc0 = Xc1[:]
@@ -635,3 +676,5 @@ def compare_nets(M1_,M2_):
     print 'Projection ',','.join(list(set([p_m1,p_m2])))
     print 'Correlation between fis:',proj_p
     print ''
+
+

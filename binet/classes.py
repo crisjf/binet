@@ -665,7 +665,7 @@ class mcp(BiGraph):
         ECI = DataFrame(zip(A.index.values,ECI),columns=[self.c,'ECI'])
         return ECI,PCI
 
-    def CalculateComplexityPlus(self,th=0.001):
+    def CalculateComplexityPlus(self,th=0.001,max_iter=5000):
         '''
         Calculates the Hidalgo Economic Complexity Plus Index.
 
@@ -677,7 +677,7 @@ class mcp(BiGraph):
         A['adj']=1
         A = A.pivot(index=self.c,columns=self.p,values='adj').fillna(0)
         X = A.as_matrix()
-        ECI,PCI = CalculateComplexityPlus(X,th=th)
+        ECI,PCI = CalculateComplexityPlus(X,th=th,max_iter=max_iter)
         PCI = DataFrame(zip(A.columns.values,PCI),columns=[self.p,'PCIp'])
         ECI = DataFrame(zip(A.index.values,ECI),columns=[self.c,'ECIp'])
         return ECI,PCI
