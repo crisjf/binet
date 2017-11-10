@@ -2,6 +2,7 @@ from networkx import Graph,minimum_spanning_tree,number_connected_components,is_
 from pandas import DataFrame,merge,concat,read_csv
 from numpy import array,matrix,mean,std,log,sqrt,exp
 from scipy.interpolate import interp1d
+from sklearn import neighbors
 from copy import deepcopy
 from community import best_partition
 import json
@@ -407,6 +408,101 @@ def read_cyto(cyto_file,node_id='shared_name'):
     for node in cyto['elements']['nodes']:
         out.append( (node['data']['shared_name'],node['position']['x'],node['position']['y']))
     return DataFrame(out,columns=[node_id,'x','y'])
+
+def calculateRCA_by_year(data,y ='',c='',p='',x='',shares=False, log_terms = False):
+    '''
+    This function handles input data from more than one year.
+    Returns the RCA expressed in data. All RCA values belong to a country-product-year.
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        Raw data. It has year,source,target,volume (trade, number of people etc.).
+    y,c,p,x : str (optional)
+        Labels of the columns in data used for source,target,volume
+    shares : boolean (False)
+        If True it will also return the shares used to calculate the RCA
+    log_terms: boolean(False)
+        If True it instead returns the log exports log(x), log 'baseline term' log(\sum_c x_{cpy}  \sum_p x_{cpy} / \sum_c \sum_p x_{cpy})
+    and log(RCA), which is by definition the diference of these two.
+    Returns
+    -------
+    RCA : pandas.DataFrame
+        Table with the RCAs, with the columns c,p,x,RCA
+        If shares is True it includes:
+            s_c : Share of X_cp over X_c
+            s_p : Share of X_cp over X_p
+        If log_terms is True, it instead includes:
+            log(x) : log of exports
+            T : log of the baseline term, which is market size of product * market size of country / total world trade
+            log(RCA) : log of RCA computed as log(x) - T
+            
+    '''
+    y = data.columns.values[0] if y == '' else y
+    c = data.columns.values[1] if c == '' else c
+    p = data.columns.values[2] if p == '' else p
+    x = data.columns.values[3] if x == '' else x
+    data_ = data[[y,c,p,x]]
+    
+    data_ = pd.merge(data_,data_.groupby([c,y]).sum()[[x]].rename(columns={x:x+'_'+c+'_'+y}).reset_index()
+               ,how='inner',left_on=[y,c],right_on=[y,c]) #This is Tc
+    data_ = pd.merge(data_,data_.groupby([p,y]).sum()[[x]].rename(columns={x:x+'_'+p+'_'+y}).reset_index()
+                  ,how='inner',left_on=[y,p],right_on=[y,p])
+    data_ = pd.merge(data_,data_.groupby(y).sum()[[x]].rename(columns={x:x+'_'+y}).reset_index()
+                  ,how='inner',left_on=y,right_on=y)
+
+    data_['RCA'] = (data_[x].astype(float)/data_[x+'_'+p+'_'+y].astype(float))/(data_[x+'_'+c+'_'+y].astype(float)/data_[x+'_'+y].astype(float))
+
+    if shares:
+        data_['s_'+c] = (data_[x].astype(float)/data_[x+'_'+c+'_'+y].astype(float)) 
+        data_['s_'+p] = (data_[x].astype(float)/data_[x+'_'+p+'_'+y].astype(float))
+        return data_[[y,c,p,x,'RCA','s_'+c,'s_'+p]]
+    if log_terms:
+        data_['log(x)'] = np.log10(data_[x].astype(float))
+        data_['T'] = -np.log10((1/data_[x+'_'+p+'_'+y].astype(float))/(data_[x+'_'+c+'_'+y].astype(float)/data_[x+'_'+y].astype(float)))
+        data_['log(RCA)'] = data_['log(x)'] - data_['T']
+        return data_[[y,c,p,x,'RCA','log(x)','T','log(RCA)']]
+    return data_[[y,c,p,x,'RCA']]
+
+def calculatepRCA(data, y ='',c='',p='',x=''):
+    '''
+    Returns the pRCA from data. pRCA is the probability that (RCA_{y+1} > 1) given the volume of exports (x_{cpy}),
+    and the 'baseline term' (\sum_c x_{cpy}  \sum_p x_{cpy} / \sum_c \sum_p x_{cpy}).
+    It is computed using k-nearest neighbors, in the space of log exports and log baseline term.
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        Raw data. It has source,target,volume (trade, number of people etc.).
+    y,c,p,x : str (optional)
+        Labels of the columns in data used for source,target,volume
+    Returns
+    -------
+    RCA : pandas.DataFrame
+        Table with the RCAs, with the columns c,p,x,RCA
+        If shares is True it also includes:
+            s_c : Share of X_cp over X_c
+            s_p : Share of X_cp over X_p
+    '''
+    df = calculateRCA_by_year(data,y ='year',c='ccode',p='pcode',x='x',log_terms = True)
+        
+    #Compute (RCA > 1) next year and merge it
+    df_ = df.copy()
+    df_['year'] = df_['year'] - 1
+    df_['RCA_y+1'] = (df_['log(RCA)'] > 0).astype(int)
+    df_ = df_[['year','ccode','pcode','RCA_y+1']]
+    df = df.merge(df_)
+    
+    #Prepare dataset for knn and fit
+    M = df[['log(x)','T','RCA_y+1']].as_matrix()
+    X, y = M[:,:2], M[:, 2] 
+    knn = neighbors.KNeighborsRegressor(n_neighbors = 200, weights = 'uniform').fit(X, y)
+
+    #To avoid memory error, compute predictions in split X. Predictions are output pRCA
+    pRCA = np.array([])
+    for x in np.array_split(X, 10):
+        pRCA = np.append(pRCA, knn.predict(x))
+    df['pRCA'] = pRCA
+    
+    return df
 
 
 def df_interp(df,by=None,x=None,y=None,kind='linear'):
