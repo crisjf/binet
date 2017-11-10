@@ -3,7 +3,20 @@ from pandas import DataFrame,merge,concat,read_csv
 from numpy import array,matrix,mean,std,log,sqrt,exp
 from scipy.interpolate import interp1d
 from copy import deepcopy
+from community import best_partition
 import json
+
+
+def communities(net,s=None,t=None,node_id=None):
+    s = net.columns.values[0] if s == None else s
+    t = net.columns.values[1] if t == None else t
+    node_id = 'node_id' if node_id is None else node_id
+    G = Graph()
+    G.add_edges_from(net[[s,t]].values)
+    part = best_partition(G)
+    part = DataFrame(part.items(),columns=[node_id,'community'])
+    print 'Number of communities:',len(set(part['community']))
+    return part
 
 def densities(m,fi):
     '''
@@ -30,14 +43,14 @@ def densities(m,fi):
     '''
     g,side = m.columns.values[:2].tolist()
     s,t,w = fi.columns.values[:3].tolist()
-    fi = pd.concat([fi,fi[[s,t,w]].rename(columns={s:t,t:s})]).drop_duplicates().rename(columns={s:side})
+    fi = concat([fi,fi[[s,t,w]].rename(columns={s:t,t:s})]).drop_duplicates().rename(columns={s:side})
     W = merge(m.rename(columns={side:t}),fi,how='left').fillna(0).groupby([g,side]).sum()[[w]].reset_index().rename(columns={w:'num'})
     fi = fi.groupby(side).sum()[[w]].reset_index().rename(columns={w:'den'})
     W = merge(W,fi)
     W['w'] = W['num']/W['den']
     W = W[[g,side,'w']]
     m['mcp'] = 1
-    m = pd.merge(m,pd.DataFrame([(gg,ss) for gg in set(m[g]) for ss in set(m[side])],columns=[g,side]),how='outer').fillna(0)
+    m = merge(m,DataFrame([(gg,ss) for gg in set(m[g]) for ss in set(m[side])],columns=[g,side]),how='outer').fillna(0)
     W = merge(W,m,how='outer').fillna(0)
     return W
 
