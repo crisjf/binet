@@ -73,8 +73,8 @@ def residualNet(data,uselog=True,c=None,p=None,x=None,usefe=False,useaggregate=T
     x = data.columns.values[2] if x is None else x
     data_ = data[[c,p,x]+numericalControls+categoricalControls]
     if useaggregate:
-        data_ = pd.merge(data_,data.groupby(c).sum()[[x]].reset_index().rename(columns={x:x+'_'+c}))
-        data_ = pd.merge(data_,data.groupby(p).sum()[[x]].reset_index().rename(columns={x:x+'_'+p}))
+        data_ = merge(data_,data.groupby(c).sum()[[x]].reset_index().rename(columns={x:x+'_'+c}))
+        data_ = merge(data_,data.groupby(p).sum()[[x]].reset_index().rename(columns={x:x+'_'+p}))
         numericalControls+=[x+'_'+c,x+'_'+p]
     if uselog:
         data_ = data_[data_[x]!=0]
@@ -525,11 +525,11 @@ def calculateRCA_by_year(data,y ='',c='',p='',x='',shares=False, log_terms = Fal
     x = data.columns.values[3] if x == '' else x
     data_ = data[[y,c,p,x]]
     
-    data_ = pd.merge(data_,data_.groupby([c,y]).sum()[[x]].rename(columns={x:x+'_'+c+'_'+y}).reset_index()
+    data_ = merge(data_,data_.groupby([c,y]).sum()[[x]].rename(columns={x:x+'_'+c+'_'+y}).reset_index()
                ,how='inner',left_on=[y,c],right_on=[y,c]) #This is Tc
-    data_ = pd.merge(data_,data_.groupby([p,y]).sum()[[x]].rename(columns={x:x+'_'+p+'_'+y}).reset_index()
+    data_ = merge(data_,data_.groupby([p,y]).sum()[[x]].rename(columns={x:x+'_'+p+'_'+y}).reset_index()
                   ,how='inner',left_on=[y,p],right_on=[y,p])
-    data_ = pd.merge(data_,data_.groupby(y).sum()[[x]].rename(columns={x:x+'_'+y}).reset_index()
+    data_ = merge(data_,data_.groupby(y).sum()[[x]].rename(columns={x:x+'_'+y}).reset_index()
                   ,how='inner',left_on=y,right_on=y)
 
     data_['RCA'] = (data_[x].astype(float)/data_[x+'_'+p+'_'+y].astype(float))/(data_[x+'_'+c+'_'+y].astype(float)/data_[x+'_'+y].astype(float))
