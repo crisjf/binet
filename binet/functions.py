@@ -9,15 +9,97 @@ import json
 
 
 def communities(net,s=None,t=None,node_id=None):
+    '''
+    Calculates the best partition from a given set of edges.
+
+    Parameters
+    ----------
+    net : pandas.DataFrame
+        Has the source and the target.
+    s,t : str (optional)
+        Source and target columns.
+        If not provided it will take the first and the second.
+    node_id : str (optional)
+        Name for the column that identifies the nodes.
+        If not provided, the column will be names 'node_id'.
+
+    Returns
+    -------
+    partition : pandas.DataFrame
+        Table with two columns, node_id and community_id
+    '''
     s = net.columns.values[0] if s == None else s
     t = net.columns.values[1] if t == None else t
     node_id = 'node_id' if node_id is None else node_id
     G = Graph()
     G.add_edges_from(net[[s,t]].values)
     part = best_partition(G)
-    part = DataFrame(part.items(),columns=[node_id,'community'])
-    print 'Number of communities:',len(set(part['community']))
+    part = DataFrame(part.items(),columns=[node_id,'community_id'])
+    print 'Number of communities:',len(set(part['community_id']))
     return part
+
+
+import statsmodels.api as sm
+
+def residualNet(data,uselog=True,c=None,p=None,x=None,usefe=False,useaggregate=True,numericalControls=[],categoricalControls=[]):
+    '''
+    Given the data on a bipartite network of the form source,target,flow
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        Raw data. It has source,target,volume (trade, number of people etc.).
+    c,p,x : str (optional)
+        Labels of the columns in data used for source,target,volume. 
+        If not provided it will use the first, second, and third.
+    numericalControls : list
+        List of columns to use as numerical controls.
+    categoricalControls : list
+        List of columns to use as categorical controls.
+    uselog : boolean (True)
+        If True it will use the logarithm of the provided weight.
+    useaggregate : boolean (True)
+        If true it will calculate the aggregate of the volume on both sides (c and p) and use as numbercal controls.
+    usefe : boolean (False)
+        If true it will use c and p fixed effects.
+        
+    Returns
+    -------
+    net : pandas.Dataframe
+        Table with c,p,x,x_res, where x_res is the residual of regressing x on the given control variables.
+    '''
+    c = data.columns.values[0] if c is None else c
+    p = data.columns.values[1] if p is None else p
+    x = data.columns.values[2] if x is None else x
+    data_ = data[[c,p,x]+numericalControls+categoricalControls]
+    if useaggregate:
+        data_ = pd.merge(data_,data.groupby(c).sum()[[x]].reset_index().rename(columns={x:x+'_'+c}))
+        data_ = pd.merge(data_,data.groupby(p).sum()[[x]].reset_index().rename(columns={x:x+'_'+p}))
+        numericalControls+=[x+'_'+c,x+'_'+p]
+    if uselog:
+        data_ = data_[data_[x]!=0]
+        data_[x] = np.log10(data_[x])
+        if useaggregate:
+            data_[x+'_'+c] = np.log10(data_[x+'_'+c])
+            data_[x+'_'+p] = np.log10(data_[x+'_'+p])
+    if usefe:
+        categoricalControls+=[c,p]
+    _categoricalControls = []
+    for var in ser(categoricalControls):
+        vals = list(set(data_[var]))
+        for v in vals[1:]:
+            _categoricalControls.append(var+'_'+str(v))
+            data_[var+'_'+str(v)]=0
+            data_.loc[data_[var]==v,var+'_'+str(v)]=1
+
+    Y = data_[x].values
+    X = data_[list(set(numericalControls))+list(set(_categoricalControls))].values
+    X = sm.add_constant(X)
+
+    model = sm.OLS(Y,X).fit()
+    data_[x+'_res'] = Y-model.predict(X)
+    return data_[[c,p,x,x+'_res']]
+
 
 def densities(m,fi):
     '''
