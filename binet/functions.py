@@ -204,8 +204,12 @@ def residualNet(data,s=None,t=None,x=None,g=None,numericalControls=[],categorica
             Y = data_g[x].values
             X = data_g[list(set(numericalControls))+list(set(_categoricalControls))].values
             X = sm.add_constant(X)
-            model = sm.OLS(Y,X).fit()
-            data_g[x+'_res'] = Y-model.predict(X)
+            try:
+                model = sm.OLS(Y,X).fit()
+                data_g[x+'_res'] = Y-model.predict(X)
+            except:
+                print 'Not able to fit group ',g
+                data_g[x+'_res'] = Y
             data_g[g] = gg
             out.append(data_g[[g,s,t,x,x+'_res']])
         data_ = concat(out)[[g,s,t,x,x+'_res']]
@@ -216,7 +220,6 @@ def residualNet(data,s=None,t=None,x=None,g=None,numericalControls=[],categorica
         model = sm.OLS(Y,X).fit()
         data_[x+'_res'] = Y-model.predict(X)
         data_ = data_[[s,t,x,x+'_res']]
-
     print 'R2 for',x,'with dummies' if addDummies else 'without dummies',model.rsquared
     return data_
 
