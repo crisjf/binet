@@ -145,7 +145,7 @@ def countBoth(data,t=None,c=None,p=None,add_marginal=True):
 
 
 import statsmodels.api as sm
-def residualNet(data,s=None,t=None,x=None,g=None,numericalControls=[],categoricalControls=[]):
+def residualNet(data,s=None,t=None,x=None,g=None,numericalControls=[],categoricalControls=[],addDummies=True):
     '''
     Given the data on a network of the form source,target,flow, it controls for the given variables, and takes the residual.
 
@@ -162,6 +162,8 @@ def residualNet(data,s=None,t=None,x=None,g=None,numericalControls=[],categorica
         List of columns to use as numerical controls.
     categoricalControls : list
         List of columns to use as categorical controls.
+    addDummies : boolean (True)
+        If True it will add controls for each node.
         
     Returns
     -------
@@ -185,11 +187,12 @@ def residualNet(data,s=None,t=None,x=None,g=None,numericalControls=[],categorica
             data_[var+'_'+str(v)]=0
             data_.loc[data_[var]==v,var+'_'+str(v)]=1
 
-    nodes = list(set(data[s])|set(data[t]))
-    for node in nodes[1:]:
-        _categoricalControls.append('node_'+str(node))
-        data_['node_'+str(node)]=0
-        data_.loc[(data_[s]==node)|(data_[t]==node),'node_'+str(node)]=1
+    if addDummies:
+        nodes = list(set(data[s])|set(data[t]))
+        for node in nodes[1:]:
+            _categoricalControls.append('node_'+str(node))
+            data_['node_'+str(node)]=0
+            data_.loc[(data_[s]==node)|(data_[t]==node),'node_'+str(node)]=1
 
     if g is not None:
         out = []
@@ -202,7 +205,7 @@ def residualNet(data,s=None,t=None,x=None,g=None,numericalControls=[],categorica
             data_g[x+'_res'] = Y-model.predict(X)
             data_g[g] = gg
             out.append(data_g[[g,s,t,x,x+'_res']])
-        data_ = pd.concat(out)[[g,s,t,x,x+'_res']]
+        data_ = concat(out)[[g,s,t,x,x+'_res']]
     else:
         Y = data_[x].values
         X = data_[list(set(numericalControls))+list(set(_categoricalControls))].values
