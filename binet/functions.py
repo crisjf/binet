@@ -39,9 +39,185 @@ def communities(net,s=None,t=None,node_id=None):
     return part
 
 
-import statsmodels.api as sm
 
-def residualNet(data,uselog=True,c=None,p=None,x=None,usefe=False,useaggregate=True,numericalControls=[],categoricalControls=[]):
+def allCombinations(data,c=None,p=None,t=None,bipartite=True):
+    '''
+    Creates all possible combinations between t,c,p.
+
+    If t is not provided, it will only create combinations between c and p
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        Table with c and p as columns.
+    c,p : str
+        Columns to use as nodes.
+    t : str
+        Group. Usually the time column.
+    bipartite : boolean (True)
+        If True it will treat the network as bipartite
+        If False it will treat it as monopartite.
+
+    Returns
+    -------
+    combinations : pandas.DataFrame
+        DataFrame with all the possible combinations.
+        If t is not provided, it has two columns with c and p.
+        If t is provided, it has three columns, with t, c and p.
+    '''
+    combs = []
+    if t is None:
+        c = data.columns.values[0] if c is None else c
+        p = data.columns.values[1] if p is None else p
+        if bipartite:
+            cs = set(data[c])
+            ps = set(data[p])
+            for cc in cs:
+                for pp in ps:
+                    combs.append((cc,pp))
+        else:
+            cs = set(data[c])|set(data[p])
+            for cc in cs:
+                for pp in cs:
+                    if cs!=ps:
+                        combs.append((cc,pp))
+        combs = DataFrame(combs,columns=[c,p])
+    else:
+        c = data.columns.values[1] if c is None else c
+        p = data.columns.values[2] if p is None else p
+        for y in set(data[t]):
+            datay = data[data[t]==y]
+            if bipartite:
+                cs = set(datay[c])
+                ps = set(datay[p])
+                for cc in cs:
+                    for pp in ps:
+                        combs.append((y,cc,pp))
+            else:
+                cs = set(datay[c])|set(datay[p])
+                for cc in cs:
+                    for pp in cs:
+                        if cc!=pp:
+                            combs.append((y,cc,pp))
+        combs = DataFrame(combs,columns=[t,c,p])
+    return combs
+
+
+def countBoth(data,t=None,c=None,p=None,add_marginal=True):
+    '''
+    Counts the coocurrences of pairs of ps on cs. 
+    For example, it counts the coocurrences of products in countries.
+    If year if provided, it will do it yearly.
+
+    Paramters
+    ---------
+    data : pandas.DataFrame
+        Data of a network connecting c and p. 
+        Can also be over time.
+    t,c,p : str
+        Name of the columns to use as t, c, and p.
+    add_marginal : boolean (True)
+        If True it will also add the sum of occurrences of p.
+    '''
+    if t is not None:
+        c = data.columns.values[1] if c is None else c
+        p = data.columns.values[2] if p is None else p
+        data_ = data[[t,c,p]].drop_duplicates()
+    else:
+        c = data.columns.values[0] if c is None else c
+        p = data.columns.values[1] if p is None else p
+        data_ = data[[c,p]].drop_duplicates()
+    net = merge(data_,data_.rename(columns={p:p+'p'}))
+    if t is not None:
+        net = net.groupby([t,p,p+'p']).count()[[c]].reset_index().rename(columns={c:'N_both'})
+    else:
+        net = net.groupby([p,p+'p']).count()[[c]].reset_index().rename(columns={c:'N_both'})
+    net = net[net[p]!=net[p+'p']]
+    if add_marginal:
+        if t is not None:
+            data_ = data_.groupby([t,p]).count()[[c]].reset_index().rename(columns={c:'N_'+p})
+        else:
+            data_ = data_.groupby([p]).count()[[c]].reset_index().rename(columns={c:'N_'+p})
+        net = merge(net,data_)
+        net = merge(net,data_.rename(columns={p:p+'p','N_'+p:'N_'+p+'p'}))
+    return net
+
+
+
+import statsmodels.api as sm
+def residualNet(data,s=None,t=None,x=None,g=None,numericalControls=[],categoricalControls=[]):
+    '''
+    Given the data on a network of the form source,target,flow, it controls for the given variables, and takes the residual.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        Raw data. It has source,target,volume (trade, number of people etc.).
+    s,t,x : str (optional)
+        Labels of the columns in data used for source,target,volume. 
+        If not provided it will use the first, second, and third.
+    g : str (optional)
+        If provided, it will run independent regressions for each value of the g column.
+    numericalControls : list
+        List of columns to use as numerical controls.
+    categoricalControls : list
+        List of columns to use as categorical controls.
+        
+    Returns
+    -------
+    net : pandas.Dataframe
+        Table with g,s,t,x,x_res, where x_res is the residual of regressing x on the given control variables.
+    '''
+    s = data.columns.values[0] if s is None else s
+    t = data.columns.values[1] if t is None else t
+    x = data.columns.values[2] if x is None else x
+
+    if g is None:
+        data_ = data[[s,t,x]+numericalControls+categoricalControls]
+    else:
+        data_ = data[[g,s,t,x]+numericalControls+categoricalControls]
+
+    _categoricalControls = []
+    for var in set(categoricalControls):
+        vals = list(set(data_[var]))
+        for v in vals[1:]:
+            _categoricalControls.append(var+'_'+str(v))
+            data_[var+'_'+str(v)]=0
+            data_.loc[data_[var]==v,var+'_'+str(v)]=1
+
+    nodes = list(set(data[s])|set(data[t]))
+    for node in nodes[1:]:
+        _categoricalControls.append('node_'+str(node))
+        data_['node_'+str(node)]=0
+        data_.loc[(data_[s]==node)|(data_[t]==node),'node_'+str(node)]=1
+
+    if g is not None:
+        out = []
+        for gg in set(data_[g]):
+            data_g = data_[data_[g]==gg]
+            Y = data_g[x].values
+            X = data_g[list(set(numericalControls))+list(set(_categoricalControls))].values
+            X = sm.add_constant(X)
+            model = sm.OLS(Y,X).fit()
+            data_g[x+'_res'] = Y-model.predict(X)
+            data_g[g] = gg
+            out.append(data_g[[g,s,t,x,x+'_res']])
+        data_ = pd.concat(out)[[g,s,t,x,x+'_res']]
+    else:
+        Y = data_[x].values
+        X = data_[list(set(numericalControls))+list(set(_categoricalControls))].values
+        X = sm.add_constant(X)
+        model = sm.OLS(Y,X).fit()
+        data_[x+'_res'] = Y-model.predict(X)
+        data_ = data_[[s,t,x,x+'_res']]
+    return data_
+
+
+
+
+
+
+def _residualNet(data,uselog=True,c=None,p=None,x=None,useaggregate=True,numericalControls=[],categoricalControls=[]):
     '''
     Given the data on a bipartite network of the form source,target,flow
 
@@ -60,8 +236,6 @@ def residualNet(data,uselog=True,c=None,p=None,x=None,usefe=False,useaggregate=T
         If True it will use the logarithm of the provided weight.
     useaggregate : boolean (True)
         If true it will calculate the aggregate of the volume on both sides (c and p) and use as numbercal controls.
-    usefe : boolean (False)
-        If true it will use c and p fixed effects.
         
     Returns
     -------
@@ -82,8 +256,6 @@ def residualNet(data,uselog=True,c=None,p=None,x=None,usefe=False,useaggregate=T
         if useaggregate:
             data_[x+'_'+c] = np.log10(data_[x+'_'+c])
             data_[x+'_'+p] = np.log10(data_[x+'_'+p])
-    if usefe:
-        categoricalControls+=[c,p]
     _categoricalControls = []
     for var in ser(categoricalControls):
         vals = list(set(data_[var]))
@@ -321,18 +493,38 @@ def order_columns(net,s=None,t=None):
     net : pandas.DataFrame
         List of links.
     '''
-    s = net.columns.values[0] if s is None else s
-    t = net.columns.values[1] if t is None else t
-    B = net[s]>net[t]
+    net_ = deepcopy(net)
+    s = net_.columns.values[0] if s is None else s
+    t = net_.columns.values[1] if t is None else t
+    B = net_[s]>net_[t]
     if B.sum() !=0:
-        S,T = zip(*net[B][[s,t]].values)
-        net.loc[B,s]=T
-        net.loc[B,t]=S
-    return net
+        S,T = zip(*net_[B][[s,t]].values)
+        net_.loc[B,s]=T
+        net_.loc[B,t]=S
+    return net_
 
+def unflatten(dis,s=None,t=None):
+    """
+    Adds repeated rows by flipping the source and the target.
 
+    Parameters
+    ----------
+    dis : pandas.DataFrame
+        Table with source,target plus other columns that will be copied
+    s,t : str (optional)
+        Labels on dis to use as source and target
 
-def flatten(dis,s=None,t=None,agg_method='sum'):
+    Returns
+    -------
+    new : pandas.DataFrame
+    """
+    s = dis.columns.values[0] if s is None else s
+    t = dis.columns.values[1] if t is None else t
+    new = concat([dis,dis.rename(columns={s:t,t:s})]).drop_duplicates()
+    new = new[dis.columns.values.tolist()]
+    return new
+
+def flatten(dis,s=None,t=None,group=None,agg_method='sum'):
     """
     Orders the nodes such that the source codes are always smaller than the target codes, and aggregates.
     It is used to flatten a directed network in a table.
@@ -345,7 +537,11 @@ def flatten(dis,s=None,t=None,agg_method='sum'):
         Labels on dis to use as source and target
     agg_method : str (default='sum')
         Aggregation method
-        Can be 'sum' or 'max'
+        Can be 'sum', 'max', or 'avg'
+    group : list (optional)
+        Columns to regard as different networks. 
+        These will not be aggregated, but used as extra labels for grouping.
+        For example, this can be the label of the time column.
 
     Returns
     -------
@@ -354,12 +550,17 @@ def flatten(dis,s=None,t=None,agg_method='sum'):
     """
     s = dis.columns.values[0] if s is None else s
     t = dis.columns.values[1] if t is None else t
+    group = [] if group is None else group
+
     new = order_columns(deepcopy(dis),s=s,t=t)
-    if len(new.columns) >2:
+    aggcol = set(new.columns.values).difference(set(group))
+    if len(aggcol) >0:
         if agg_method=='sum':
-            new = new.groupby([s,t]).sum().reset_index()
+            new = new.groupby(group+[s,t]).sum().reset_index()
         elif agg_method=='max':
-            new = new.groupby([s,t]).max().reset_index()
+            new = new.groupby(group+[s,t]).max().reset_index()
+        elif agg_method=='avg':
+            new = new.groupby(group+[s,t]).mean().reset_index()
         else:
             raise NameError('Unrecognized aggregation method '+agg_method)
     else:
@@ -491,7 +692,7 @@ def read_cyto(cyto_file,node_id='shared_name'):
         out.append( (node['data']['shared_name'],node['position']['x'],node['position']['y']))
     return DataFrame(out,columns=[node_id,'x','y'])
 
-def calculateRCA_by_year(data,y ='',c='',p='',x='',shares=False, log_terms = False):
+def calculateRCA_by_year(data,y='',c='',p='',x='',shares=False, log_terms = False):
     '''
     This function handles input data from more than one year.
     Returns the RCA expressed in data. All RCA values belong to a country-product-year.
