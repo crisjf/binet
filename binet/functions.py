@@ -4,7 +4,10 @@ from numpy import array,matrix,mean,std,log,sqrt,exp
 from scipy.interpolate import interp1d
 from sklearn import neighbors
 from copy import deepcopy
-from community import best_partition
+try:
+    from community import best_partition
+except:
+    print 'Warning: No module named community found.'
 import json
 
 
