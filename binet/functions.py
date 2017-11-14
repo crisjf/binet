@@ -216,10 +216,9 @@ def residualNet(data,s=None,t=None,x=None,g=None,numericalControls=[],categorica
         model = sm.OLS(Y,X).fit()
         data_[x+'_res'] = Y-model.predict(X)
         data_ = data_[[s,t,x,x+'_res']]
+
+    print 'R2 for',x,'with dummies' if addDummies else 'without dummies',model.rsquared
     return data_
-
-
-
 
 
 
@@ -279,7 +278,7 @@ def _residualNet(data,uselog=True,c=None,p=None,x=None,useaggregate=True,numeric
     return data_[[c,p,x,x+'_res']]
 
 
-def densities(m,fi):
+def densities(m,fi,normalize=True):
     '''
     Calculates the density of related entities.
     
@@ -294,6 +293,8 @@ def densities(m,fi):
         Table with relatedness between entities.
         Has the columns:
             entity_id_source,entity_id_target,weight
+    normalize : boolean (True)
+        If False, it will not normalize by the degree.
     
     Returns
     -------
@@ -308,7 +309,10 @@ def densities(m,fi):
     W = merge(m.rename(columns={side:t}),fi,how='left').fillna(0).groupby([g,side]).sum()[[w]].reset_index().rename(columns={w:'num'})
     fi = fi.groupby(side).sum()[[w]].reset_index().rename(columns={w:'den'})
     W = merge(W,fi)
-    W['w'] = W['num']/W['den']
+    if normalize:
+        W['w'] = W['num']/W['den']
+    else:
+        W['w'] = W['num']
     W = W[[g,side,'w']]
     m['mcp'] = 1
     m = merge(m,DataFrame([(gg,ss) for gg in set(m[g]) for ss in set(m[side])],columns=[g,side]),how='outer').fillna(0)
