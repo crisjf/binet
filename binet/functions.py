@@ -1,6 +1,6 @@
 from networkx import Graph,minimum_spanning_tree,number_connected_components,is_connected,connected_component_subgraphs
 from pandas import DataFrame,merge,concat,read_csv
-from numpy import array,matrix,mean,std,log,sqrt,exp
+from numpy import array,matrix,mean,std,log,sqrt,exp,log10,array_split
 from scipy.interpolate import interp1d
 from sklearn import neighbors
 from copy import deepcopy
@@ -260,10 +260,10 @@ def _residualNet(data,uselog=True,c=None,p=None,x=None,useaggregate=True,numeric
         numericalControls+=[x+'_'+c,x+'_'+p]
     if uselog:
         data_ = data_[data_[x]!=0]
-        data_[x] = np.log10(data_[x])
+        data_[x] = log10(data_[x])
         if useaggregate:
-            data_[x+'_'+c] = np.log10(data_[x+'_'+c])
-            data_[x+'_'+p] = np.log10(data_[x+'_'+p])
+            data_[x+'_'+c] = log10(data_[x+'_'+c])
+            data_[x+'_'+p] = log10(data_[x+'_'+p])
     _categoricalControls = []
     for var in ser(categoricalControls):
         vals = list(set(data_[var]))
@@ -753,13 +753,14 @@ def calculateRCA_by_year(data,y='',c='',p='',x='',shares=False, log_terms = Fals
         data_['s_'+p] = (data_[x].astype(float)/data_[x+'_'+p+'_'+y].astype(float))
         return data_[[y,c,p,x,'RCA','s_'+c,'s_'+p]]
     if log_terms:
-        data_['log(x)'] = np.log10(data_[x].astype(float))
-        data_['T'] = -np.log10((1/data_[x+'_'+p+'_'+y].astype(float))/(data_[x+'_'+c+'_'+y].astype(float)/data_[x+'_'+y].astype(float)))
+        data_['log(x)'] = log10(data_[x].astype(float))
+        data_['T'] = -log10((1/data_[x+'_'+p+'_'+y].astype(float))/(data_[x+'_'+c+'_'+y].astype(float)/data_[x+'_'+y].astype(float)))
         data_['log(RCA)'] = data_['log(x)'] - data_['T']
         return data_[[y,c,p,x,'RCA','log(x)','T','log(RCA)']]
     return data_[[y,c,p,x,'RCA']]
 
-def calculatepRCA(data, y ='',c='',p='',x=''):
+
+def calculatepRCA(data, y ='',c='',p='',x='', return_knn = False):
     '''
     Returns the pRCA from data. pRCA is the probability that (RCA_{y+1} > 1) given the volume of exports (x_{cpy}),
     and the 'baseline term' (\sum_c x_{cpy}  \sum_p x_{cpy} / \sum_c \sum_p x_{cpy}).
@@ -770,13 +771,13 @@ def calculatepRCA(data, y ='',c='',p='',x=''):
         Raw data. It has source,target,volume (trade, number of people etc.).
     y,c,p,x : str (optional)
         Labels of the columns in data used for source,target,volume
+    return_knn: Boolean. True if you want the knn object returned as well.
     Returns
     -------
-    RCA : pandas.DataFrame
-        Table with the RCAs, with the columns c,p,x,RCA
-        If shares is True it also includes:
-            s_c : Share of X_cp over X_c
-            s_p : Share of X_cp over X_p
+    pRCA : pandas.DataFrame
+        Table with the pRCAs, with the columns c,p,y,pRCA
+        If return_knn is True the function returns this dataframe and the 
+    fitted knn object for making predictions. 
     '''
     df = calculateRCA_by_year(data,y ='year',c='ccode',p='pcode',x='x',log_terms = True)
         
@@ -793,12 +794,15 @@ def calculatepRCA(data, y ='',c='',p='',x=''):
     knn = neighbors.KNeighborsRegressor(n_neighbors = 200, weights = 'uniform').fit(X, y)
 
     #To avoid memory error, compute predictions in split X. Predictions are output pRCA
-    pRCA = np.array([])
-    for x in np.array_split(X, 10):
-        pRCA = np.append(pRCA, knn.predict(x))
+    pRCA = array([])
+    for x in array_split(X, 10):
+        pRCA = append(pRCA, knn.predict(x))
     df['pRCA'] = pRCA
-    
-    return df
+
+    if return_knn:
+        return df, knn
+    else:
+        return df
 
 
 def df_interp(df,by=None,x=None,y=None,kind='linear'):
