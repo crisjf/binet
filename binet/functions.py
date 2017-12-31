@@ -141,6 +141,14 @@ def countBoth(data,t=None,c=None,p=None,add_marginal=True):
             data_ = data_.groupby([t,p]).count()[[c]].reset_index().rename(columns={c:'N_'+p})
         else:
             data_ = data_.groupby([p]).count()[[c]].reset_index().rename(columns={c:'N_'+p})
+        ps = list(set(net[p])|set(net[p+'p']))
+        if t is not None:
+            ts = list(set(net[t]))
+            combs = DataFrame([(t1,p1,p2) for p1 in ps for p2 in ps for t1 in ts],columns=[t,p,p+'p'])
+        else:
+            combs = DataFrame([(p1,p2) for p1 in ps for p2 in ps],columns=[p,p+'p'])
+        combs = combs[combs[p]!=combs[p+'p']]
+        net = merge(combs,net,how='left').fillna(0)
         net = merge(net,data_)
         net = merge(net,data_.rename(columns={p:p+'p','N_'+p:'N_'+p+'p'}))
     return net
@@ -148,7 +156,7 @@ def countBoth(data,t=None,c=None,p=None,add_marginal=True):
 
 
 import statsmodels.api as sm
-def residualNet(data,s=None,t=None,x=None,g=None,numericalControls=[],categoricalControls=[],addDummies=True):
+def residualNet(data,s=None,t=None,x=None,g=None,numericalControls=[],categoricalControls=[],addDummies=False,show_results=False):
     '''
     Given the data on a network of the form source,target,flow, it controls for the given variables, and takes the residual.
 
@@ -165,8 +173,10 @@ def residualNet(data,s=None,t=None,x=None,g=None,numericalControls=[],categorica
         List of columns to use as numerical controls.
     categoricalControls : list
         List of columns to use as categorical controls.
-    addDummies : boolean (True)
+    addDummies : boolean (False)
         If True it will add controls for each node.
+    show_results : boolean (False)
+        If True it will print the R2 and the values of the coefficients
         
     Returns
     -------
@@ -211,16 +221,23 @@ def residualNet(data,s=None,t=None,x=None,g=None,numericalControls=[],categorica
                 print 'Not able to fit group ',g
                 data_g[x+'_res'] = Y
             data_g[g] = gg
-            out.append(data_g[[g,s,t,x,x+'_res']])
-        data_ = concat(out)[[g,s,t,x,x+'_res']]
+            if show_results:
+                print 'R2 for',x,'with dummies' if addDummies else 'without dummies','for '+str(gg),model.rsquared
+                for columns_name,parameter_value in zip((['c']+list(set(numericalControls))+list(set(_categoricalControls))),model.params):
+                    print '\t',columns_name,parameter_value
+            out.append(data_g[[g,s,t,x+'_res',x]+list(set(numericalControls))+list(set(categoricalControls))])
+        data_ = concat(out)[[g,s,t,x+'_res',x]+list(set(numericalControls))+list(set(categoricalControls))]
     else:
         Y = data_[x].values
         X = data_[list(set(numericalControls))+list(set(_categoricalControls))].values
         X = sm.add_constant(X)
         model = sm.OLS(Y,X).fit()
         data_[x+'_res'] = Y-model.predict(X)
-        data_ = data_[[s,t,x,x+'_res']]
-    print 'R2 for',x,'with dummies' if addDummies else 'without dummies',model.rsquared
+        data_ = data_[[s,t,x+'_res',x]+list(set(numericalControls))+list(set(categoricalControls))]
+        if show_results:
+            print 'R2 for',x,'with dummies' if addDummies else 'without dummies',model.rsquared
+            for columns_name,parameter_value in zip((['c']+list(set(numericalControls))+list(set(_categoricalControls))),model.params):
+                print '\t',columns_name,parameter_value
     return data_
 
 
