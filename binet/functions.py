@@ -673,16 +673,23 @@ def build_connected(net,th,s=None,t=None,w=None,directed=False,progress=True):
         edges_out[s] = edges_out[s].astype(net.dtypes[s])
         edges_out[t] = edges_out[t].astype(net.dtypes[t])
         return edges_out
-    
 
-def calculateRCA(data,c='',p='',x='',shares=False):
+
+def calculateRCA(data,y=None,c=None,p=None,x=None,shares=False,log_terms=False):
     '''
     Returns the RCA expressed in data
 
     Parameters
     ----------
     data : pandas.DataFrame
-        Raw data. It has source,target,volume (trade, number of people etc.).
+        Raw data:
+            y : time (year for example, only if parameter y is provided)
+            c : source (country for example)
+            p : target (product for example)
+            x : volume (trade volume for example)
+    y : str (optional)
+        Label of the year column. 
+        If not provided it will pool everything together.
     c,p,x : str (optional)
         Labels of the columns in data used for source,target,volume
     shares : boolean (False)
@@ -696,36 +703,149 @@ def calculateRCA(data,c='',p='',x='',shares=False):
             s_c : Share of X_cp over X_c
             s_p : Share of X_cp over X_p
     '''
-    c = data.columns.values[0] if c == '' else c
-    p = data.columns.values[1] if p == '' else p
-    x = data.columns.values[2] if x == '' else x
-    data_ = data[[c,p,x]]
-    data_ = merge(data_,data_.groupby(c).sum()[[x]].rename(columns={x:x+'_'+c}).reset_index()
-                         ,how='inner',left_on=c,right_on=c)
-    data_ = merge(data_,data_.groupby(p).sum()[[x]].rename(columns={x:x+'_'+p}).reset_index()
-                         ,how='inner',left_on=p,right_on=p)
-    X = float(data_.sum()[x])
-    data_['RCA'] = (data_[x].astype(float)/data_[x+'_'+p].astype(float))/(data_[x+'_'+c].astype(float)/X)
+    if (y is None):
+        c = data.columns.values[0] if c is None else c
+        p = data.columns.values[1] if p is None else p
+        x = data.columns.values[2] if x is None else x
+    elif (data.columns.values[0]!=y):
+        c = data.columns.values[0] if c is None else c
+        p = data.columns.values[1] if p is None else p
+        x = data.columns.values[2] if x is None else x
+    else:
+        c = data.columns.values[1] if c is None else c
+        p = data.columns.values[2] if p is None else p
+        x = data.columns.values[3] if x is None else x
+    if y is not None:
+        if c==y:
+            raise NameError('Please provide parameter c')
+        elif len(set([c,p,x,y])) < 4:
+            raise NameError("Column labels were confused")
+
+    if y is None:
+        data_ = data[[c,p,x]].groupby([c,p]).sum().reset_index()
+        data_ = merge(data_,data_.groupby(c).sum()[[x]].rename(columns={x:x+'_'+c}).reset_index(),how='inner',left_on=c,right_on=c)
+        data_ = merge(data_,data_.groupby(p).sum()[[x]].rename(columns={x:x+'_'+p}).reset_index(),how='inner',left_on=p,right_on=p)
+        data_[x+'_y'] = float(data_.sum()[x])
+        out_cols = [c,p,x,'RCA']    
+    else:
+        data_ = data[[y,c,p,x]].groupby([y,c,p]).sum().reset_index()
+        data_ = merge(data_,data_.groupby([y,c]).sum()[[x]].rename(columns={x:x+'_'+c}).reset_index(),how='inner',left_on=[y,c],right_on=[y,c])
+        data_ = merge(data_,data_.groupby([y,p]).sum()[[x]].rename(columns={x:x+'_'+p}).reset_index(),how='inner',left_on=[y,p],right_on=[y,p])
+        data_ = merge(data_,data_.groupby([y]).sum()[[x]].rename(columns={x:x+'_y'}).reset_index(),how='inner',left_on=y,right_on=y)        
+        out_cols = [y,c,p,x,'RCA']
+    data_['RCA'] = (data_[x].astype(float)/data_[x+'_'+p].astype(float))/(data_[x+'_'+c].astype(float)/data_[x+'_y'].astype(float))        
     if shares:
         data_['s_'+c] = (data_[x].astype(float)/data_[x+'_'+c].astype(float)) 
         data_['s_'+p] = (data_[x].astype(float)/data_[x+'_'+p].astype(float))
-        return data_[[c,p,x,'RCA','s_'+c,'s_'+p]]
-    return data_[[c,p,x,'RCA']]
+        out_cols += ['s_'+c,'s_'+p]
+    if log_terms:
+        data_['log(x)'] = log10(data_[x].astype(float))
+        data_['T'] = -log10((1/data_[x+'_'+p].astype(float))/(data_[x+'_'+c].astype(float)/data_[x+'_y'].astype(float)))
+        data_['log(RCA)'] = data_['log(x)'] - data_['T']
+        out_cols += ['log(x)','T','log(RCA)']
+    return data_[out_cols]
 
 
-def read_cyto(cyto_file,node_id='shared_name'):
-    """Reads the positions of the nodes in cytoscape"""
-    with open(cyto_file) as data_file:
-        cyto = json.load(data_file)
-    out = []
-    for node in cyto['elements']['nodes']:
-        out.append( (node['data']['shared_name'],node['position']['x'],node['position']['y']))
-    return DataFrame(out,columns=[node_id,'x','y'])
+def calculateRCApop(data,pop,y=None,c=None,p=None,x=None,P=None,shares=False):
+    '''
+    Returns the RCA adjusted by population
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        Raw data:
+            y : time (year for example, only if parameter y is provided)
+            c : source (country for example)
+            p : target (product for example)
+            x : volume (trade volume for example)
+    pop : pandas.DataFrame
+        Raw population data. The column label for the region must coincide with the label in data.
+            y : time (year for example, only if paramter y is provided)
+            c : source (country for example)
+            P : population data
+    y : str (optional)
+        Label of the year column. 
+        If not provided it will pool everything together.
+    c,p,x,P : str (optional)
+        Labels of the columns in data used for source,target,volume, and population
+    shares : boolean (False)
+        If True it will also return the shares used to calculate the RCA
+
+    Returns
+    -------
+    RCApop : pandas.DataFrame
+        Table with the RCApops, with the columns c,p,x,RCApop
+        If shares is True it also includes:
+            s_c : Share of X_cp over Pop_c
+            s_p : Share of X_p over Pop
+    '''
+
+    if (y is None):
+        c = data.columns.values[0] if c is None else c
+        p = data.columns.values[1] if p is None else p
+        x = data.columns.values[2] if x is None else x
+    elif (data.columns.values[0]!=y):
+        c = data.columns.values[0] if c is None else c
+        p = data.columns.values[1] if p is None else p
+        x = data.columns.values[2] if x is None else x
+    else:
+        c = data.columns.values[1] if c is None else c
+        p = data.columns.values[2] if p is None else p
+        x = data.columns.values[3] if x is None else x
+    if c not in pop.columns.values:
+        raise NameError("Column "+c+" not found in population table")
+        
+    if (y is None):
+        P = pop.columns.values[1] if P is None else P
+    elif pop.columns.values[0]!=y:
+        P = pop.columns.values[1] if P is None else P
+    else:
+        P = pop.columns.values[2] if P is None else P    
+    if P==c:
+        raise NameError('Please provide parameter P')
+
+    if y is not None:
+        if c==y:
+            raise NameError('Please provide parameter c')
+
+    if len(set(data[c]).difference(set(pop[c])))!=0:
+        print 'Warning: missing population for '+str(len(set(data[c]).difference(set(pop[c]))))+' regions'
+    if len(set([c,p,x,P,y])) < 5:
+        raise NameError("Column labels were confused")
+
+    if y is None:
+        data_ = data[[c,p,x]].groupby([c,p]).sum().reset_index()
+        pop_ = pop[[c,P]].groupby(c).mean().reset_index()
+    else:
+        data_ = data[[y,c,p,x]].groupby([y,c,p]).sum().reset_index()
+        pop_ = pop[[y,c,P]].groupby([y,c]).mean().reset_index()
+    
+    data_ = merge(data_,pop_,how='inner')
+    if y is None:
+        data_ = merge(data_,data_.groupby(p).sum()[[x]].rename(columns={x:x+'_'+p}).reset_index(),how='inner',left_on=p,right_on=p)
+        data_[P+'_y'] = data_[[c,P]].drop_duplicates()['pop'].sum()
+        out_cols = [c,p,x,'RCApop']
+    else:
+        data_ = merge(data_,data_.groupby([y,p]).sum()[[x]].rename(columns={x:x+'_'+p}).reset_index(),how='inner',left_on=[y,p],right_on=[y,p])
+        data_ = merge(data_,data_[[y,c,P]].drop_duplicates().groupby([y]).sum()[[P]].rename(columns={P:P+'_y'}).reset_index(),how='inner',left_on=[y],right_on=[y])
+        out_cols = [y,c,p,x,'RCApop']
+    data_['RCApop'] = (data_[x].astype(float)/data_[P].astype(float))*(data_[P+'_y'].astype(float)/data_[x+'_'+p].astype(float))
+    if shares:
+        data_['s_'+c] = data_[x].astype(float)/data_[P].astype(float)
+        data_['s_'+p] = data_[x+'_'+p].astype(float)/data_[P+'_y'].astype(float)
+        out_cols += ['s_'+c,'s_'+p]
+    return data_[out_cols]
+
+
 
 def calculateRCA_by_year(data,y='',c='',p='',x='',shares=False, log_terms = False):
     '''
     This function handles input data from more than one year.
     Returns the RCA expressed in data. All RCA values belong to a country-product-year.
+    
+    This function will be deprecated in favor of the new functionality of calculateRCA(). 
+    Please see the documentation for calculateRCA().
+
     Parameters
     ----------
     data : pandas.DataFrame
@@ -750,6 +870,7 @@ def calculateRCA_by_year(data,y='',c='',p='',x='',shares=False, log_terms = Fals
             log(RCA) : log of RCA computed as log(x) - T
             
     '''
+    print 'Warning: This function will be deprecated in favor of the new functionality of calculateRCA().\nPlease see the documentation for calculateRCA().'
     y = data.columns.values[0] if y == '' else y
     c = data.columns.values[1] if c == '' else c
     p = data.columns.values[2] if p == '' else p
@@ -777,6 +898,8 @@ def calculateRCA_by_year(data,y='',c='',p='',x='',shares=False, log_terms = Fals
     return data_[[y,c,p,x,'RCA']]
 
 
+
+
 def calculatepRCA(data, y ='',c='',p='',x='', return_knn = False):
     '''
     Returns the pRCA from data. pRCA is the probability that (RCA_{y+1} > 1) given the volume of exports (x_{cpy}),
@@ -796,7 +919,9 @@ def calculatepRCA(data, y ='',c='',p='',x='', return_knn = False):
         If return_knn is True the function returns this dataframe and the 
     fitted knn object for making predictions. 
     '''
-    df = calculateRCA_by_year(data,y ='year',c='ccode',p='pcode',x='x',log_terms = True)
+    print 'Warning: using new yearly RCA funcion. Please check results before using.'
+    # df = calculateRCA_by_year(data,y ='year',c='ccode',p='pcode',x='x',log_terms = True)
+    df = calculateRCA(data,y ='year',c='ccode',p='pcode',x='x',log_terms = True)
         
     #Compute (RCA > 1) next year and merge it
     df_ = df.copy()
@@ -823,15 +948,35 @@ def calculatepRCA(data, y ='',c='',p='',x='', return_knn = False):
 
 
 def df_interp(df,by=None,x=None,y=None,kind='linear'):
-    '''Groups df by the given column, and interpolates the missing values.
-    THIS ONE CAN ALSO BE PARALELLIZED'''
+    '''
+    Groups df by the given column, and interpolates the missing values.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Data to be interpolated. It has the columns
+            by : group (e.g. country id)
+            x  : independent variable (e.g. year)
+            y  : dependent variable (e.g. population)
+    by,x,y: str (optional)
+        Label of the columns for the groups, independent variable, and dependent variable.
+        If not provided, it will take first, second, and third, respeectively.
+    kind : str (optional)
+        Default is linear.
+        Type of interpolation, see documentation for scipy.interpolate.interp1d()
+    
+    Returns
+    -------
+    interp : pandas.DataFrame
+        Table with the interpolated results.
+    '''
     by = df.columns.values[0] if by is None else by
     x  = df.columns.values[1] if x is None else x
     y  = df.columns.values[2] if y is None else y
     interp = []
     cs = list(set(df[by].values))
     for c in cs:
-        gc = df[df[by]==c].sort_values(by=x)
+        gc = df[df[by]==c].sort_values(by=x).dropna()
         X = gc[x]
         Y = gc[y]
         f = interp1d(X, Y, kind=kind)
@@ -895,6 +1040,14 @@ def r_test(Nhops,th=0,p_val=False,directed=True,s=None,t=None,n=None):
         return Nt[[s,t,n,'r','t','95','99','p-value']]
     return Nt[[s,t,n,'r','t','95','99']]
 
+def read_cyto(cyto_file,node_id='shared_name'):
+    """Reads the positions of the nodes in cytoscape"""
+    with open(cyto_file) as data_file:
+        cyto = json.load(data_file)
+    out = []
+    for node in cyto['elements']['nodes']:
+        out.append( (node['data']['shared_name'],node['position']['x'],node['position']['y']))
+    return DataFrame(out,columns=[node_id,'x','y'])
 
 
 def build_html(nodes,edges,node_id =None,source_id =None,target_id=None,size_id=None,weight_id = None,x=None,y=None,color=None,props = None,progress=True,max_colors=15):
@@ -987,120 +1140,4 @@ def build_html(nodes,edges,node_id =None,source_id =None,target_id=None,size_id=
     html += sample_data + 'var positions =' + positions + 'var connections ='+connections
     html += viz +'\n</script>'
     return html
-
-
-def compare_nets(M1_,M2_):
-    '''
-    Given two BiGraph objects it compares them on different dimensions.
-    (NEEDS TO BE TESTED)
-    '''
-    n1 = 'Unnamed' if M1_.name == '' else M1_.name
-    n2 = 'Unnamed' if M2_.name == '' else M2_.name
-
-    M1 = deepcopy(M1_)
-    M2 = deepcopy(M2_)
-    if M1.net is None:
-        M1.build_net(progress=False)
-    if M2.net is None:
-        M2.build_net(progress=False)
-    edges1 = M1.net[[M1.c,M1.p]]
-    edges2 = M2.net[[M2.c,M2.p]]
-
-    nodes1 = set(M1.nodes(M1.c)[M1.c].values)
-    nodes2 = set(M2.nodes(M2.c)[M2.c].values)
-    c_total_nodes     = len(nodes1|nodes2)
-    c_repeated_nodes  = len(nodes1.intersection(nodes2))
-    c_f_missing_nodes = 1.-len(nodes1.intersection(nodes2))/float(len(nodes1|nodes2))
-    c_f_missing_1     = 1.-len(nodes1)/float(len(nodes1|nodes2))
-    c_f_missing_2     = 1.-len(nodes2)/float(len(nodes1|nodes2))
-
-    nodes_c = list(nodes1.intersection(nodes2))
-    nodes = DataFrame(nodes_c,columns=['node_id'])
-    edges1 = merge(edges1,nodes,how='right',left_on=M1.c,right_on='node_id').drop('node_id',1)
-    edges2 = merge(edges2,nodes,how='right',left_on=M2.c,right_on='node_id').drop('node_id',1)
-
-    nodes1 = set(M1.nodes(M1.p)[M1.p].values)
-    nodes2 = set(M2.nodes(M2.p)[M2.p].values)
-    p_total_nodes     = len(nodes1|nodes2)
-    p_repeated_nodes  = len(nodes1.intersection(nodes2))
-    p_f_missing_nodes = 1.-len(nodes1.intersection(nodes2))/float(len(nodes1|nodes2))
-    p_f_missing_1     = 1.-len(nodes1)/float(len(nodes1|nodes2))
-    p_f_missing_2     = 1.-len(nodes2)/float(len(nodes1|nodes2))        
-
-    nodes_p = list(nodes1.intersection(nodes2))
-    nodes = DataFrame(nodes_p,columns=['node_id'])
-    edges1 = merge(edges1,nodes,how='right',left_on=M1.p,right_on='node_id').drop('node_id',1)
-    edges2 = merge(edges2,nodes,how='right',left_on=M2.p,right_on='node_id').drop('node_id',1)
-    
-    edges1['edge'] = edges1[M1.c].astype(str)+'-'+edges1[M1.p].astype(str)
-    edges2['edge'] = edges2[M2.c].astype(str)+'-'+edges2[M1.p].astype(str)
-    edges1 = set(edges1['edge'].values.tolist())
-    edges2 = set(edges2['edge'].values.tolist())
-
-    e_total_edges     = len(edges1|edges2)
-    e_f_missing_edges = 1.-len(edges1.intersection(edges1))/float(len(edges1|edges2))
-    e_f_missing_1     = 1.-len(edges1)/float(len(edges1|edges2))
-    e_f_missing_2     = 1.-len(edges2)/float(len(edges1|edges2))
-
-    M1.filter_nodes(nodes_c=nodes_c,nodes_p=nodes_p)
-    M2.filter_nodes(nodes_c=nodes_c,nodes_p=nodes_p)
-    M1.build_net(progress=False)
-    M2.build_net(progress=False)
-
-    edges1 = M1.net[[M1.c,M1.p]]
-    edges2 = M2.net[[M2.c,M2.p]]
-    edges1['edge'] = edges1[M1.c].astype(str)+'-'+edges1[M1.p].astype(str)
-    edges2['edge'] = edges2[M2.c].astype(str)+'-'+edges2[M1.p].astype(str)
-    edges1 = set(edges1['edge'].values.tolist())
-    edges2 = set(edges2['edge'].values.tolist())
-
-    f_total_edges     = len(edges1|edges2)
-    f_f_missing_edges = 1.-len(edges1.intersection(edges1))/float(len(edges1|edges2))
-    f_f_missing_1     = 1.-len(edges1)/float(len(edges1|edges2))
-    f_f_missing_2     = 1.-len(edges2)/float(len(edges1|edges2))
-
-    cp = merge(M1.projection(M1.c).rename(columns={'fi':'fi_1'}),M2.projection(M2.c).rename(columns={'fi':'fi_2'}),how='inner')
-    proj_c = corrcoef(cp['fi_1'],cp['fi_2'])[0,1]
-    cp = merge(M1.projection(M1.p).rename(columns={'fi':'fi_1'}),M2.projection(M2.p).rename(columns={'fi':'fi_2'}),how='inner')
-    proj_p = corrcoef(cp['fi_1'],cp['fi_2'])[0,1]
-
-    c_m1 = M1.c
-    c_m2 = M2.c
-    p_m1 = M1.p
-    p_m2 = M2.p
-
-    print 'Summary of comparing networks '+n1+' with '+n2
-    print ','.join(list(set([c_m1,c_m2])))
-    print '\tTotal nodes          :',c_total_nodes
-    print '\tTotal repeated nodes :',c_repeated_nodes
-    print '\tFracion missing nodes:',c_f_missing_nodes
-    print '\tMissing nodes on 1   :',c_f_missing_1
-    print '\tMissing nodes on 2   :',c_f_missing_2
-    print ''
-    print ','.join(list(set([p_m1,p_m2])))
-    print '\tTotal nodes          :',p_total_nodes
-    print '\tTotal repeated nodes :',p_repeated_nodes
-    print '\tFracion missing nodes:',p_f_missing_nodes
-    print '\tMissing nodes on 1   :',p_f_missing_1
-    print '\tMissing nodes on 2   :',p_f_missing_2
-    print ''
-    print ','.join(list(set([str(c_m1)+'-'+str(p_m1),str(c_m2)+'-'+str(p_m2)])))
-    print '\tTotal edges          :',e_total_edges
-    print '\tFracion missing edges:',e_f_missing_edges
-    print '\tMissing edges on 1   :',e_f_missing_1
-    print '\tMissing edges on 2   :',e_f_missing_2
-    print ''
-    print 'Filtered '+','.join(list(set([str(c_m1)+'-'+str(p_m1),str(c_m2)+'-'+str(p_m2)])))
-    print '\tTotal edges          :',f_total_edges
-    print '\tFracion missing edges:',f_f_missing_edges
-    print '\tMissing edges on 1   :',f_f_missing_1
-    print '\tMissing edges on 2   :',f_f_missing_2
-    print ''
-    print 'Projection ',','.join(list(set([c_m1,c_m2])))
-    print 'Correlation between fis:',proj_c
-    print ''
-    print 'Projection ',','.join(list(set([p_m1,p_m2])))
-    print 'Correlation between fis:',proj_p
-    print ''
-
 
