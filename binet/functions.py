@@ -10,8 +10,53 @@ except:
     print 'Warning: No module named community found.'
 import json
 
+def growth(L_s,t=None,x=None,group=None,useLast=False):
+    '''
+    Calculates the growth of a variable in the given table.
 
-def communities(net,s=None,t=None,node_id=None):
+    Parameters
+    ----------
+    L_s : pandas.DataFrame
+        Table with columns:
+            t     : discrete time column
+            group : columns that index the group
+            x     : variable to calculate growth of
+    t : str (optional)
+        Column name of discrete time variable
+    group : list (optional)
+        Columns to use as groups (ex: country codes)
+    x : str (optional)
+        Column of the variable to calcualte growth of
+    useLast : boolean (False)
+        If True it will use the last timestamp in the time window as the reference.
+        For example, the growth between 2006 and 2007 will be counted as growth for 2007 if this variable is True
+
+    Returns
+    -------
+    g : pandas.DataFrame
+        Table with columns:
+            t     : time column
+            group : group columns
+            g     : growth column
+    '''
+    t = L_s.columns.values[0] if t is None else t
+    group = [L_s.columns.values[1]] if group is None else group
+    x = L_s.columns.values[2] if x is None else x
+    g = L_s[[t]+group+[x]]
+    time = ['NULL']+sorted(list(set(g[t])))+['NULL']
+    g[t+'m1'] = [time[time.index(tt)-1] for tt in g[t]]
+    g = merge(g.drop(t+'m1',1),g.drop(t,1).rename(columns={t+'m1':t,x:x+'p1'}))
+    if useLast:
+        g['year'] = g['year']+1
+        g = g.rename(columns={x:x+'m1',x+'p1':x})
+        g['g'] = log(g[x]/g[x+'m1'])
+    else:
+        g['g'] = log(g[x+'p1']/g[x])
+    g = g[[t]+group+['g']]
+    return g
+
+
+def communities(net,s=None,t=None,w=None,node_id=None,progress=True):
     '''
     Calculates the best partition from a given set of edges.
 
@@ -25,6 +70,10 @@ def communities(net,s=None,t=None,node_id=None):
     node_id : str (optional)
         Name for the column that identifies the nodes.
         If not provided, the column will be names 'node_id'.
+    w : str (optional)
+        Column of the weight.
+    progress : boolean (True)
+    	If True it will print the number of communities
 
     Returns
     -------
@@ -36,9 +85,13 @@ def communities(net,s=None,t=None,node_id=None):
     node_id = 'node_id' if node_id is None else node_id
     G = Graph()
     G.add_edges_from(net[[s,t]].values)
-    part = best_partition(G)
+    if w is None:
+        part = best_partition(G)
+    else:
+        part = best_partition(G,weight=w)
     part = DataFrame(part.items(),columns=[node_id,'community_id'])
-    print 'Number of communities:',len(set(part['community_id']))
+    if progress:
+    	print 'Number of communities:',len(set(part['community_id']))
     return part
 
 
@@ -554,7 +607,7 @@ def unflatten(dis,s=None,t=None):
     new = new[dis.columns.values.tolist()]
     return new
 
-def flatten(dis,s=None,t=None,group=None,agg_method='sum'):
+def flatten(dis,s=None,t=None,group=None,agg_method='avg'):
     """
     Orders the nodes such that the source codes are always smaller than the target codes, and aggregates.
     It is used to flatten a directed network in a table.
@@ -565,7 +618,7 @@ def flatten(dis,s=None,t=None,group=None,agg_method='sum'):
         Table with source,target plus other columns that will be aggregated
     s,t : str (optional)
         Labels on dis to use as source and target
-    agg_method : str (default='sum')
+    agg_method : str (default='avg')
         Aggregation method
         Can be 'sum', 'max', or 'avg'
     group : list (optional)
@@ -598,20 +651,22 @@ def flatten(dis,s=None,t=None,group=None,agg_method='sum'):
     return new
 
 
-def build_connected(net,th,s=None,t=None,w=None,directed=False,progress=True):
+def build_connected(net,th,s=None,t=None,w=None,directed=False,mst2max=False):
     """Builds a connected network out of a set of weighted edges and a threshold.
 
     Parameters
     ----------
-    net : pandas DataFrame
-            Contains at least three columns: source, target, and weight
+    net : pandas.DataFrame
+        Contains at least three columns: source, target, and weight
     th : float
-            Threshold to use for the network.
-    s,t,w : (optional) strings
-            Names of the columns in net to use as source, target, and weight, respectively.
-            If it is not provided, the first three columns as assumed to be s,t,and w, respectively.
-    directed : False (default)
-            Wether to consider the network as directed or as undirected.
+        Threshold to use for the network.
+    s,t,w : str (optional)
+        Names of the columns in net to use as source, target, and weight, respectively.
+        If it is not provided, the first three columns as assumed to be s,t,and w, respectively.
+    directed : boolean (False)
+        Wether to consider the network as directed or as undirected.
+    mst2max : boolean (False)
+        If True it will set all the links from the MST to the maximum possible value.
 
     Returns
     -------
@@ -648,11 +703,12 @@ def build_connected(net,th,s=None,t=None,w=None,directed=False,progress=True):
         G = Graph()    
         G.add_edges_from(zip(dis[s].values,dis[t].values,[{'weight':-f} for f in dis[w]]))
         T = minimum_spanning_tree(G)
+        mst_edges = T.edges()
         T.add_edges_from([(u,v,{'weight':-we}) for u,v,we in dis[dis[w]>=th].values.tolist()])
-        if progress:
-            print 'N edges:',len(T.edges())
-            print 'N nodes:',len(T.nodes())
-            print 'Avg deg:',2*len(T.edges())/float(len(T.nodes()))
+        if mst2max:
+            w_max = dis[w].max() 
+            for u,v in mst_edges:
+                T[u][v]['weight']=-w_max
         out = []
         for u,v in T.edges():
             out.append((u,v,-T.get_edge_data(u, v)['weight']))
@@ -668,8 +724,11 @@ def build_connected(net,th,s=None,t=None,w=None,directed=False,progress=True):
         Tedges = concat([DataFrame(T.edges(),columns=[s,t]).reset_index(),DataFrame(T.edges(),columns=[t,s]).reset_index()])
         Tedges = merge(Tedges,dis).dropna()
         idx = Tedges.groupby(['index'])[w].transform(max) == Tedges[w]
-        edges_out = Tedges[idx][[s,t]]
-        edges_out = merge(concat([dis[dis[w]>=th][[s,t]],edges_out]).drop_duplicates(),dis)
+        edges_mst = Tedges[idx][[s,t]]
+        edges_out = merge(concat([dis[dis[w]>=th][[s,t]],edges_mst]).drop_duplicates(),dis)
+        if mst2max:
+            w_max = dis[w].max()
+            edges_out.loc[(edges_out[s].isin(set(edges_mst[s])))&(edges_out[t].isin(set(edges_mst[t]))),w] = w_max
         edges_out[s] = edges_out[s].astype(net.dtypes[s])
         edges_out[t] = edges_out[t].astype(net.dtypes[t])
         return edges_out
