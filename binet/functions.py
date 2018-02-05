@@ -1,14 +1,25 @@
 from networkx import Graph,minimum_spanning_tree,number_connected_components,is_connected,connected_component_subgraphs
 from pandas import DataFrame,merge,concat,read_csv
-from numpy import array,matrix,mean,std,log,sqrt,exp,log10,array_split
+from numpy import array,matrix,mean,std,log,sqrt,exp,log10,array_split,random
 from scipy.interpolate import interp1d
 from sklearn import neighbors
 from copy import deepcopy
+from itertools import chain
 try:
     from community import best_partition
 except:
     print 'Warning: No module named community found.'
 import json
+
+
+def df_shuffle(df):
+    return df.reindex(random.permutation(df.index))
+
+def chunker(seq, size):
+    return (seq[pos:pos + size] for pos in xrange(0, len(seq), size))
+
+def list_join(a):
+    return list(chain.from_iterable(a))
 
 def growth(L_s,t=None,x=None,group=None,useLast=False):
     '''
