@@ -702,6 +702,8 @@ def build_connected(net,th,s=None,t=None,w=None,directed=False,mst2max=False):
     w = net.columns.values[2] if w is None else w
 
     dis = net[[s,t,w]]
+    if not directed:
+        dis = dis[dis[s]!=dis[t]]
     dis[s] = dis[s].astype(int).astype(str)
     dis[t] = dis[t].astype(int).astype(str)
 
@@ -726,6 +728,7 @@ def build_connected(net,th,s=None,t=None,w=None,directed=False,mst2max=False):
         edges = DataFrame(out,columns=[s,t,w])
         edges[s] = edges[s].astype(net.dtypes[s])
         edges[t] = edges[t].astype(net.dtypes[t])
+        print 'Average degree:',2*len(edges)/float(len(set(edges[s])|set(edges[t])))
         return edges
     else:
         new = order_nodes(dis,s=None,t=None)
@@ -742,6 +745,7 @@ def build_connected(net,th,s=None,t=None,w=None,directed=False,mst2max=False):
             edges_out.loc[(edges_out[s].isin(set(edges_mst[s])))&(edges_out[t].isin(set(edges_mst[t]))),w] = w_max
         edges_out[s] = edges_out[s].astype(net.dtypes[s])
         edges_out[t] = edges_out[t].astype(net.dtypes[t])
+        print 'Average degree:',2*len(edges_out)/float(len(set(edges_out[s])|set(edges_out[t])))
         return edges_out
 
 
@@ -1110,7 +1114,7 @@ def r_test(Nhops,th=0,p_val=False,directed=True,s=None,t=None,n=None):
         return Nt[[s,t,n,'r','t','95','99','p-value']]
     return Nt[[s,t,n,'r','t','95','99']]
 
-def read_cyto(cyto_file,node_id='shared_name'):
+def readCyto(cyto_file,node_id='shared_name'):
     """Reads the positions of the nodes in cytoscape"""
     with open(cyto_file) as data_file:
         cyto = json.load(data_file)
