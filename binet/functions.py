@@ -864,11 +864,11 @@ def calculateRCApop(data,pop,y=None,c=None,p=None,x=None,P=None,shares=False):
         x = data.columns.values[2] if x is None else x
     else:
         c = pop.columns.values[1]  if c is None else c
-        P = data.columns.values.tolist()[:4]
-        P.remove('year')
-        P.remove('rcode')
-        p = P[0] if p is None else p
-        x = P[-1] if x is None else x
+        pp = data.columns.values.tolist()[:4]
+        pp.remove('year')
+        pp.remove('rcode')
+        p = pp[0]  if p is None else p
+        x = pp[-1] if x is None else x
     if (c not in pop.columns.values):
         raise NameError("Column "+c+" not found population table")
     for col in [c,p,x]:
