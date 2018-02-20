@@ -857,22 +857,24 @@ def calculateRCApop(data,pop,y=None,c=None,p=None,x=None,P=None,shares=False):
             s_c : Share of X_cp over Pop_c
             s_p : Share of X_p over Pop
     '''
-
     if (y is None):
-        c = data.columns.values[0] if c is None else c
-        p = data.columns.values[1] if p is None else p
-        x = data.columns.values[2] if x is None else x
-    elif (data.columns.values[0]!=y):
-        c = data.columns.values[0] if c is None else c
-        p = data.columns.values[1] if p is None else p
+        c = pop.columns.values[0]  if c is None else c
+        if p is None:
+            p = data.columns.values[1] if data.columns.values[0]==c else data.columns.values[0]
         x = data.columns.values[2] if x is None else x
     else:
-        c = data.columns.values[1] if c is None else c
-        p = data.columns.values[2] if p is None else p
-        x = data.columns.values[3] if x is None else x
-    if c not in pop.columns.values:
-        raise NameError("Column "+c+" not found in population table")
-        
+        c = pop.columns.values[1]  if c is None else c
+        P = data.columns.values.tolist()[:4]
+        P.remove('year')
+        P.remove('rcode')
+        p = P[0] if p is None else p
+        x = P[-1] if x is None else x
+    if (c not in pop.columns.values):
+        raise NameError("Column "+c+" not found population table")
+    for col in [c,p,x]:
+        if (col not in data.columns.values):
+            raise NameError("Column "+col+" not found in data table")
+
     if (y is None):
         P = pop.columns.values[1] if P is None else P
     elif pop.columns.values[0]!=y:
@@ -880,7 +882,7 @@ def calculateRCApop(data,pop,y=None,c=None,p=None,x=None,P=None,shares=False):
     else:
         P = pop.columns.values[2] if P is None else P    
     if P==c:
-        raise NameError('Please provide parameter P')
+        raise NameError('Please provide parameter P as name of population column')
 
     if y is not None:
         if c==y:
