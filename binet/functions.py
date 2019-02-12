@@ -21,7 +21,7 @@ def chunker(seq, size):
 def list_join(a):
     return list(chain.from_iterable(a))
 
-def growth(L_s,t=None,x=None,group=None,useLast=False):
+def growth(L_s,t=None,x=None,group=None,useLast=False,useLog=True):
     '''
     Calculates the growth of a variable in the given table.
 
@@ -60,9 +60,15 @@ def growth(L_s,t=None,x=None,group=None,useLast=False):
     if useLast:
         g['year'] = g['year']+1
         g = g.rename(columns={x:x+'m1',x+'p1':x})
-        g['g'] = log(g[x]/g[x+'m1'])
+        if useLog:
+            g['g'] = log(g[x]/g[x+'m1'])
+        else:
+            g['g'] = g[x]-[x+'m1']
     else:
-        g['g'] = log(g[x+'p1']/g[x])
+        if useLog:
+            g['g'] = log(g[x+'p1']/g[x])
+        else:
+            g['g'] = g[x+'p1']-g[x]
     g = g[[t]+group+['g']]
     return g
 
@@ -362,7 +368,7 @@ def _residualNet(data,uselog=True,c=None,p=None,x=None,useaggregate=True,numeric
     return data_[[c,p,x,x+'_res']]
 
 
-def densities(m,fi,normalize=True):
+def densities(data,fi,y=None,normalize=True):
     '''
     Calculates the density of related entities.
     
@@ -377,6 +383,8 @@ def densities(m,fi,normalize=True):
         Table with relatedness between entities.
         Has the columns:
             entity_id_source,entity_id_target,weight
+    y : str (optional)
+        Column with time dimension
     normalize : boolean (True)
         If False, it will not normalize by the degree.
     
@@ -387,19 +395,49 @@ def densities(m,fi,normalize=True):
         Has the columns:
             group_id,entity_id,density,mcp
     '''
-    g,side = m.columns.values[:2].tolist()
-    s,t,w = fi.columns.values[:3].tolist()
-    fi = concat([fi,fi[[s,t,w]].rename(columns={s:t,t:s})]).drop_duplicates().rename(columns={s:side})
-    W = merge(m.rename(columns={side:t}),fi,how='left').fillna(0).groupby([g,side]).sum()[[w]].reset_index().rename(columns={w:'num'})
-    fi = fi.groupby(side).sum()[[w]].reset_index().rename(columns={w:'den'})
-    W = merge(W,fi)
+    
+    if y is None:
+        g,side = data.columns.values[:2].tolist()
+        s,t,w  = fi.columns.values[:3].tolist()
+        m = data[[g,side]]
+    else:
+        g,side = data.columns.values[1:3].tolist()
+        s,t,w  = fi.columns.values[1:4].tolist()
+        m = data[[y,g,side]]
+
+    if y is None:
+        fi = concat([fi[[  t,s,w]],fi[[  s,t,w]].rename(columns={s:t,t:s})]).drop_duplicates().rename(columns={s:side})
+    else:
+        fi = concat([fi[[y,t,s,w]],fi[[y,s,t,w]].rename(columns={s:t,t:s})]).drop_duplicates().rename(columns={s:side})
+
+    W  = merge(m.rename(columns={side:t}),fi,how='left').fillna(0)
+
+    if y is None:
+        W = W.groupby([  g,side]).sum()[[w]].reset_index().rename(columns={w:'num'})
+    else:
+        W = W.groupby([y,g,side]).sum()[[w]].reset_index().rename(columns={w:'num'})
+
+    if y is None:
+        fi = fi.groupby([  side]).sum()[[w]].reset_index().rename(columns={w:'den'})
+    else:
+        fi = fi.groupby([y,side]).sum()[[w]].reset_index().rename(columns={w:'den'})
+
+    W  = merge(W,fi)
     if normalize:
         W['w'] = W['num']/W['den']
     else:
         W['w'] = W['num']
-    W = W[[g,side,'w']]
+
+    if y is None:
+        W = W[[  g,side,'w']]
+    else:
+        W = W[[y,g,side,'w']]
+
     m['mcp'] = 1
-    m = merge(m,DataFrame([(gg,ss) for gg in set(m[g]) for ss in set(m[side])],columns=[g,side]),how='outer').fillna(0)
+    if y is None:
+        m = merge(m,DataFrame([(   gg,ss) for gg in set(m[g]) for ss in set(m[side])],columns=[g,side]),how='outer').fillna(0)
+    else:
+        m = merge(m,DataFrame([(yy,gg,ss) for yy in set(m[y]) for gg in set(m[g]) for ss in set(m[side])],columns=[y,g,side]),how='outer').fillna(0)
     W = merge(W,m,how='outer').fillna(0)
     return W
 
@@ -458,7 +496,7 @@ def getJenksBreaks( dataList, numClass ):
     
 
 
-def CalculateComplexity(M,th=0.0001):
+def _CalculateComplexity(M,th=0.0001):
     '''
     Calculates the Economic Complexity Index following the method of reflections presented in
     Hidalgo and Hausmann 2010, The building blocks of economic complexity.
@@ -501,6 +539,87 @@ def CalculateComplexity(M,th=0.0001):
     ECI = (kc-mean(kc))/std(kc)
     PCI = (kp-mean(kp))/std(kp)
     return ECI.tolist(),PCI.tolist()
+
+def CalculateComplexity(data,y=None,c=None,p=None,x=None,th=0.0001):
+    '''
+    Calculates the Economic Complexity Index following the method of reflections presented in
+    Hidalgo and Hausmann 2010, The building blocks of economic complexity.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        Raw data including y,c,p,x columns
+            y : time (year for example, only if parameter y is provided)
+            c : source (country for example)
+            p : target (product for example)
+            x : volume (trade volume for example)
+    y : str (optional)
+        Label of the year column. 
+        If not provided it will pool everything together.
+    c,p,x : str (optional)
+        Labels of the columns in data used for source,target,volume
+    th : scalar.
+        The stopping criteria for the method of reflections.
+    
+    Returns
+    -------
+    ECI : pandas.DataFrame
+        Table with year,ccode,ECI
+    PCI : pandas.DataFrame
+        Table with year,pcode,PCI
+
+    Example
+    -------
+    >> ECI,PCI = CalculateComplexity(data,y='year')
+    '''
+    if (y is None):
+        c = data.columns.values[0] if c is None else c
+        p = data.columns.values[1] if p is None else p
+        x = data.columns.values[2] if x is None else x
+    elif (data.columns.values[0]!=y):
+        c = data.columns.values[0] if c is None else c
+        p = data.columns.values[1] if p is None else p
+        x = data.columns.values[2] if x is None else x
+    else:
+        c = data.columns.values[1] if c is None else c
+        p = data.columns.values[2] if p is None else p
+        x = data.columns.values[3] if x is None else x
+    if len(set([c,p,x,y])) < 4:
+        raise NameError("Column labels were confused")
+
+    if y is None:
+        net = data.groupby([c,p]).sum()[[x]].reset_index()
+    else:
+        net = data.groupby([y,c,p]).sum()[[x]].reset_index()
+    net = calculateRCA(net,y=y,c=c,p=p,x=x)
+    net = net[net['RCA']>=1]
+
+    ECIout = []
+    PCIout = []
+    if y is not None:
+        for year in set(net[y]):
+            A = net[net[y]==year][[c,p]]
+            A['adj']=1
+            A = A.pivot(index=c,columns=p,values='adj').fillna(0)
+            ECI,PCI = _CalculateComplexity(A.as_matrix(),th=th)
+            PCI = DataFrame(zip(A.columns.values,PCI),columns=[p,'PCI'])
+            ECI = DataFrame(zip(A.index.values,ECI),columns=[c,'ECI'])
+            PCI[y] = year
+            ECI[y] = year
+            PCIout.append(PCI[[y,p,'PCI']])
+            ECIout.append(ECI[[y,c,'ECI']])
+    else:
+        A = net[[c,p]]
+        A['adj']=1
+        A = A.pivot(index='rcode',columns='icode',values='adj').fillna(0)
+        ECI,PCI = _CalculateComplexity(A.as_matrix(),th=th)
+        PCI = DataFrame(zip(A.columns.values,PCI),columns=['icode','PCI'])
+        ECI = DataFrame(zip(A.index.values,ECI),columns=['rcode','ECI'])
+        PCIout.append(PCI)
+        ECIout.append(ECI)
+    ECIout = concat(ECIout)
+    PCIout = concat(PCIout)
+    return ECIout,PCIout
 
 
 def CalculateComplexityPlus(X,th=0.001,max_iter=5000):
@@ -865,8 +984,8 @@ def calculateRCApop(data,pop,y=None,c=None,p=None,x=None,P=None,shares=False):
     else:
         c = pop.columns.values[1]  if c is None else c
         pp = data.columns.values.tolist()[:4]
-        pp.remove('year')
-        pp.remove('rcode')
+        pp.remove(y)
+        pp.remove(c)
         p = pp[0]  if p is None else p
         x = pp[-1] if x is None else x
     if (c not in pop.columns.values):
